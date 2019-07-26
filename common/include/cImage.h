@@ -9,6 +9,8 @@
 
 #define MAX_IMAGES 0x7fffffff
 
+struct GifFileType;
+
 // Namespace
 namespace AGK
 {
@@ -17,6 +19,8 @@ namespace AGK
 	bool loadPngImageFromMemory(unsigned char *name, int &outWidth, int &outHeight, bool &outHasAlpha, unsigned char **outData);
 	bool loadPngImage(const char *name, int &outWidth, int &outHeight, bool &outHasAlpha, unsigned char **outData);
 	void write_png(const char *file_name, int width, int height, UINT* bits);
+
+	int ReadGifFile( GifFileType *file, unsigned char *buffer, int length );
 
 	class Point2D;
 	class cImage;
@@ -70,6 +74,17 @@ namespace AGK
 			~cTextLink() {}
 	};
 	*/
+
+	class cGifFrame
+	{
+		public:
+			unsigned char* pData;
+			unsigned int iCompressedSize;
+			float fDelay;
+
+			cGifFrame() { pData = 0; iCompressedSize = 0; fDelay = 0; }
+			~cGifFrame() { if ( pData ) delete [] pData; }
+	};
 
 	class _EXPORT_ cImage
 	{
@@ -136,6 +151,15 @@ namespace AGK
 			cImage **m_pLetterImages;
 			cImage **m_pLetterImagesExt;
 
+			cGifFrame **m_pGifFrames;
+			unsigned int m_iGifNumFrames;
+			unsigned int m_iGifCurrFrame;
+			unsigned int m_iGifFramesArraySize;
+			float m_fGifTime;
+			cImage * m_pPrevGifImage;
+			cImage * m_pNextGifImage;
+			static cImage* g_pAllGifImages;
+
 			//cSpriteLink*		m_pCurrentSprites;
 			//cTextLink*			m_pCurrentTextObjects;
 			cHashedList<cSprite>* m_pCurrentSprites;
@@ -143,8 +167,8 @@ namespace AGK
 			
 			cImage*				m_pPrevImage;
 			cImage*				m_pNextImage;
-			static cImage* g_pAllImages;
-			//static cHashedList<cImage>  m_cAllImages;
+			static cImage*		g_pAllImages;
+			
 			static UINT iCurrTexture[8];
 			static int g_iAlphaColThreshold;
             static int g_iSavePixels;
@@ -172,22 +196,27 @@ namespace AGK
 			static void CacheNewSize( const char* szFile, float scaleX, float scaleY, int maxTexSize );
 
 			// get data
-			static bool GetGifFromFile( const char* szFile, unsigned char **pData, unsigned int *width, unsigned int *height );
+			bool GetGifFromFile( const char* szFile, unsigned char **pData, unsigned int *width, unsigned int *height );
 			static bool PlatformGetDataFromFile( const char* szFile, unsigned char **pData, unsigned int *width, unsigned int *height );
 			static void PlatformGetDataFromScreen( unsigned int** pData, int x, int y, int width, int height );
 
 			static void CommonResize( unsigned char * pSrc, int width1, int height1, unsigned char * pDest, int width2, int height2 );
 			static void PlatformSaveDataToFile( const char* szFile, unsigned char *pData, unsigned int width, unsigned int height );
+
+			void UpdateGifImage();
 			
 		public:
 
 			static void BindTexture( UINT iTex, UINT stage=0 );
 			static void ReloadAllImages();
 			static void SaveAllImages();
+			static void UpdateGifImages();
+
+			static unsigned int GetImageSizeFromFile( const char* filename );
 
 			static int GetSupportsNPOT();
 			static int GetMaxTextureSize();
-
+			
 			void AddChild( cImage *pChild );
 			void RemoveChild( cImage *pChild );
 

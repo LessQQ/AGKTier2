@@ -332,9 +332,10 @@ namespace AGK
 			static UINT m_bSensorFlags;
 
 			// keyboard
-			static unsigned char m_iPrevKeyDown[ 256 ];
-			static unsigned char m_iKeyDown[ 256 ];
-			static unsigned char m_iResetKey[ 256 ];
+			#define AGK_MAX_KEYS 512
+			static unsigned char m_iPrevKeyDown[ AGK_MAX_KEYS ];
+			static unsigned char m_iKeyDown[ AGK_MAX_KEYS ];
+			static unsigned char m_iResetKey[ AGK_MAX_KEYS ];
 			static unsigned int m_iLastKey;
 			static int m_iKeyboardMode;
 
@@ -363,6 +364,7 @@ namespace AGK
 			static uString m_sCurrInput;
 			static int m_iLastChar;
 			static int m_iCurrChar;
+			static uString m_sCharBuffer;
 			static float m_fCursorBlinkDelay;
 			static UINT m_iInputMaxChars;
 			static uString m_sInputLabel;
@@ -639,6 +641,7 @@ namespace AGK
 			static cHashedList<BroadcastListener> m_cBroadcastListenerList;
 			static cHashedList<AGKSocket> m_cSocketList;
 			static cHashedList<cNetworkListener> m_cSocketListenerList;
+			static cHashedList<UDPManager> m_cUDPListenerList;
 			static cHashedList<cParticleEmitter> m_cParticleEmitterList;
 			static cHashedList<cEditBox> m_cEditBoxList;
 			static cHashedList<ZipFile> m_cZipFileList;
@@ -861,7 +864,7 @@ namespace AGK
         
             // social command helpers
             static int FacebookHandleOpenURL( void* url );
-            static void FacebookReceivedNotification( const char* data );
+            static void HandleDeepLink( const char* link );
 
 			// capabilities
 			static int CanUseIntIndices();
@@ -890,6 +893,8 @@ namespace AGK
 			static void MaximizeWindow();
 			static void MinimizeApp();
 			static void RestoreApp();
+			static int GetWindowWidth();
+			static int GetWindowHeight();
 			static void SetImmersiveMode( int mode );
 			static int GetDeviceWidth();
 			static int GetRealDeviceWidth();
@@ -915,6 +920,8 @@ namespace AGK
 			static int GetPaused();
 			static int GetResumed();
 			static int GetResumed2();
+			static char* GetURLSchemeText();
+			static void ClearURLSchemeText();
 			static char* GetDeviceName();
 			static void GetDeviceName( uString &sString );
 			static char* GetDeviceBaseName();
@@ -958,6 +965,7 @@ namespace AGK
 			static void SetExpansionFileKey( const char *key );
 			static void SetExpansionFileVersion(int version);
 			static int GetExpansionFileState();
+			static int GetExpansionFileError();
 			static void DownloadExpansionFile();
 			static float GetExpansionFileProgress();
 			static bool ExtractExpansionFile( const char* localFile, const char* expansionFile );
@@ -1063,6 +1071,7 @@ namespace AGK
 			static void Message( const char* msg );
 			
 			// image functions
+			static UINT GetImageSizeFromFile( const char* filename );
 			static cImage* GetImagePtr ( UINT iImageIndex );
 			static UINT GetImageTextureID ( UINT iImageIndex );
 			static void LoadImage ( UINT iImageIndex, const char* sImageFilename, int bBlackToAlpha );
@@ -1184,6 +1193,9 @@ namespace AGK
 			static int GetSpriteActive( UINT iSpriteIndex );
 			static int GetSpriteGroup( UINT iSpriteIndex );
 			static int GetSpriteTransparency( UINT iSpriteIndex );
+			static int GetSpriteFlippedH(UINT iSpriteIndex);
+			static int GetSpriteFlippedV(UINT iSpriteIndex);
+			static int GetSpriteInScreen( UINT iSpriteIndex );
 
 			static float GetSpriteXFromPixel( UINT iSpriteIndex, int x );
 			static float GetSpriteYFromPixel( UINT iSpriteIndex, int y );
@@ -1239,7 +1251,7 @@ namespace AGK
 			static void SetSpriteCollideBit( UINT iSpriteIndex, UINT category, int flag, int shapeID );
 
 			static void DrawSprite( UINT iSpriteIndex );
-
+			
 			// physics commands
 			static void SetPhysicsScale( float scale );
 			static void SetPhysicsGravity( float x, float y );
@@ -1500,6 +1512,8 @@ namespace AGK
 			static void UpdateParticles( UINT ID, float time );
 			static void OffsetParticles( UINT ID, float x, float y );
 
+			static void DrawParticles( UINT ID );
+
 			// text commands
 			static void SetTextDefaultFontImage( UINT iImageID );
 			static void SetTextDefaultExtendedFontImage( UINT iImageID );
@@ -1601,9 +1615,10 @@ namespace AGK
 			static void FixSkeleton2DToScreen( UINT iSkeleton, int mode );
 			static void SetSkeleton2DVisible( UINT iSkeleton, int mode );
 
-			static float GetSkeleton2DX( UINT skeleton );
-			static float GetSkeleton2DY( UINT skeleton );
-			static float GetSkeleton2DAngle( UINT skeleton );
+			static float GetSkeleton2DX( UINT iskeleton );
+			static float GetSkeleton2DY( UINT iskeleton );
+			static float GetSkeleton2DAngle( UINT iskeleton );
+			static int GetSkeleton2DDepth(UINT iskeleton);
 
 			//static UINT AddSkeleton2DBone( UINT iSkeleton, UINT parent, const char* name );
 			static int GetSkeleton2DBone( UINT iSkeleton, const char* name );
@@ -1918,12 +1933,15 @@ namespace AGK
 			static void CompleteRawJoystickDetection();
 			static int GetRawJoystickExists( UINT index );
 			static int GetRawJoystickConnected( UINT index );
+			static char* GetRawJoystickName( UINT index );
 			static float GetRawJoystickX( UINT index );
 			static float GetRawJoystickY( UINT index );
 			static float GetRawJoystickZ( UINT index );
 			static float GetRawJoystickRX( UINT index );
 			static float GetRawJoystickRY( UINT index );
 			static float GetRawJoystickRZ( UINT index );
+			static int GetRawJoystickSlider( UINT index, UINT slider );
+			static int GetRawJoystickPOV( UINT index, UINT pov );
 			static int GetRawJoystickButtonPressed( UINT index, UINT button );
 			static int GetRawJoystickButtonState( UINT index, UINT button );
 			static int GetRawJoystickButtonReleased( UINT index, UINT button );
@@ -1967,6 +1985,8 @@ namespace AGK
 			static int GetRawKeyState( UINT key );
 			static int GetRawKeyReleased( UINT key );
 			static int GetRawLastKey();
+			static char* GetCharBuffer();
+			static int GetCharBufferLength();
 		
 			// AGK emulated input commands
 			static int GetPointerPressed();
@@ -2041,6 +2061,7 @@ namespace AGK
 			static void SetEditBoxPasswordMode( UINT index, int mode );
             static void SetEditBoxUseAlternateInput( UINT index, int mode );
 			static void SetEditBoxWrapMode( UINT index, int mode );
+			static void SetEditBoxInputType( UINT index, int inputType );
 			static void FixEditBoxToScreen( UINT index, int fix );
 			static char* GetEditBoxText( UINT index );
 			static float GetEditBoxX( UINT index );
@@ -2049,6 +2070,7 @@ namespace AGK
 			static float GetEditBoxHeight( UINT index );
 			static int GetEditBoxChanged( UINT index );
 			static int GetEditBoxActive( UINT index );
+			static int GetEditBoxDepth(UINT index);
 			static int GetEditBoxVisible( UINT index );
 			static int GetEditBoxLines( UINT index );
 			static int GetEditBoxCursorPosition( UINT index );
@@ -2128,6 +2150,9 @@ namespace AGK
 			static int IsSoundRecording();
 
 			static void VibrateDevice( float seconds );
+
+			static void SetClipboardText( const char* szText );
+			static char* GetClipboardText();
 
 			// file system commands
 			static char* SimplifyPath( const char *szPath );
@@ -2277,10 +2302,12 @@ namespace AGK
 			static float GetNetworkClientFloat( UINT iNetID, UINT client, const char *name );
 
 			static UINT CreateNetworkMessage( );
+			static UINT CopyNetworkMessage( UINT iFromMsgID );
 			static void AddNetworkMessageInteger( UINT iMsgID, int value );
 			static void AddNetworkMessageFloat( UINT iMsgID, float value );
 			static void AddNetworkMessageString( UINT iMsgID, const char *value );
 			static char* GetNetworkMessageFromIP( UINT iMsgID );
+			static int GetNetworkMessageFromPort( UINT iMsgID );
 			static UINT GetNetworkMessageFromClient( UINT iMsgID );
 			static int GetNetworkMessageInteger( UINT iMsgID );
 			static float GetNetworkMessageFloat( UINT iMsgID );
@@ -2292,6 +2319,13 @@ namespace AGK
 			
 			static void SetNetworkClientUserData( UINT iNetID, UINT client, UINT index, int value );
 			static int GetNetworkClientUserData( UINT iNetID, UINT client, UINT index );
+
+			// UDP
+			static UINT CreateUDPListener( const char* ip, int port );
+			static int CreateUDPListener( UINT listenerID, const char* ip, int port );
+			static void SendUDPNetworkMessage( UINT listenerID, UINT messageID, const char* toIP, int toPort );
+			static UINT GetUDPNetworkMessage( UINT listenerID );
+			static void DeleteUDPListener( UINT listenerID );
 
 			// HTTP commands
 			static UINT CreateHTTPConnection();
@@ -2332,6 +2366,7 @@ namespace AGK
 			static void ShareText( const char* szText );
 			static void ShareImage( const char* szFilename );
 			static void ShareImageAndText( const char* szFilename, const char* szText );
+			static void ShareFile( const char* szFilename );
 		
 			// string commands
 			static char* Str( int value );
@@ -2474,6 +2509,9 @@ namespace AGK
             static void SocialPluginsSetup ( void );
             static void SocialPluginsDestroy ( void );
 
+			// youtube
+			static void PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime );
+
 			// video commands
 			static int LoadVideo( const char *szFilename );
 			static void DeleteVideo();
@@ -2510,9 +2548,11 @@ namespace AGK
 			static void Speak( const char *text, int delay );
 			static void SetSpeechRate( float rate );
 			static void SetSpeechLanguage( const char* lang );
+			static void SetSpeechLanguageByID( const char* sID );
             static int GetSpeechNumVoices();
             static char* GetSpeechVoiceLanguage( int index );
             static char* GetSpeechVoiceName( int index );
+			static char* GetSpeechVoiceID( int index );
 			static int IsSpeaking();
 			static void StopSpeaking();
         
@@ -2613,7 +2653,12 @@ namespace AGK
 			static UINT CreateZip( const char* filename );
 			static void AddZipEntry( UINT zipID, const char* path, const char* zipPath );
 			static void CloseZip( UINT zipID );
-			static void ExtractZip( const char* zipfilename, const char* path );
+			static void ExtractZip( const char* zipfilename, const char* path);
+			static void ExtractZip(const char* zipfilename, const char* path, const char* password);
+			static void ExtractZipASync(const char* zipfilename, const char* path, const char* password);
+			static float GetZipExtractProgress();
+			static int GetZipExtractComplete();
+			static void CancelZipExtract();
 
 			// memblock functions (do not exist at this time)
 			static UINT CreateMemblock( UINT size );
@@ -2704,6 +2749,7 @@ namespace AGK
 			static void GameCenterSetup();
 			static void GameCenterSetup( const char *szKey, const char *szData );
 			static void GameCenterLogin();
+			static void GameCenterLogout();
 			static int GetGameCenterLoggedIn();
 			static char* GetGameCenterPlayerID();
 			static char* GetGameCenterPlayerDisplayName();
@@ -2747,6 +2793,8 @@ namespace AGK
 			static UINT CreateObjectQuad();
 
 			static void CreateObjectFromHeightMap( UINT objID, const char* szImageFile, float width, float height, float length, int smoothing, int split ); 
+			static void CreateObjectFromRawHeightMap(UINT objID, const char* szImageFile, float width, float height, float length, int smoothing, int split, int rawWidth, int rawHeight );
+			static UINT CreateObjectFromRawHeightMap( const char* szImageFile, float width, float height, float length, int smoothing, int split, int rawWidth, int rawHeight);
 			static UINT CreateObjectFromHeightMap( const char* szImageFile, float width, float height, float length, int smoothing, int split );
 
 			static UINT CreateObjectFromObjectMesh( UINT fromObjID, UINT meshIndex );
@@ -2784,7 +2832,11 @@ namespace AGK
 
 			// mesh
 			static UINT GetObjectNumMeshes( UINT objID );
+			static UINT GetObjectNumTextures(UINT objID);
 			static char* GetObjectMeshName( UINT objID, UINT meshIndex );
+			static char* GetObjectTextureName(UINT objID, UINT textureIndex);
+			static void SetObjectMeshVisible(UINT objID, UINT meshIndex, int mode);
+			static void SetObjectMeshCollisionMode(UINT objID, int meshIndex, int mode);
 			static void SetObjectMeshImage( UINT objID, UINT meshIndex, UINT imageID, UINT textureStage );
 			static void SetObjectMeshLightMap( UINT objID, UINT meshIndex, UINT imageID );
 			static void SetObjectMeshNormalMap( UINT objID, UINT meshIndex, UINT imageID );
@@ -2911,6 +2963,7 @@ namespace AGK
 			static void SetObjectNormalMapScale( UINT objID, float scaleU, float scaleV );
 			static void SetObjectShader( UINT objID, UINT shaderID );
 			static void SetObjectColor( UINT objID, int red, int green, int blue, int alpha );
+			static void SetObjectAlpha( UINT objID, int alpha );
 			static void SetObjectColorEmissive( UINT objID, int red, int green, int blue );
 			static void SetObjectLightMode( UINT objID, int mode );
 			static void SetObjectScreenCulling( UINT objID, int mode );
@@ -2939,6 +2992,10 @@ namespace AGK
 			static int GetObjectInScreen( UINT objID );
 			static int GetObjectCastShadowMode( int objID );
 			static int GetObjectReceiveShadowMode( int objID );
+			static int GetObjectColorRed( int objID );
+			static int GetObjectColorGreen( int objID );
+			static int GetObjectColorBlue( int objID );
+			static int GetObjectAlpha( int objID );
 
 			static char* GetObjectName( UINT objID );
 			
@@ -3130,6 +3187,8 @@ namespace AGK
 
 			static void Update3DParticles( UINT ID, float time );
 			static void Offset3DParticles( UINT ID, float x, float y, float z );
+
+			static void Draw3DParticles( UINT ID );
 
 			//3D Physics Commands
 

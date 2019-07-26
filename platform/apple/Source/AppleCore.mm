@@ -2,6 +2,7 @@
 #include "OpenGLES2.h"
 
 #import <sys/utsname.h>
+#include <deque>
 
 #include "zlib.h"
 #include "SocialPlugins.h"
@@ -26,6 +27,9 @@
 #include <net/if.h>
 
 #import <ARKit/ARKit.h>
+#import <WebKit/WKWebView.h>
+#import <WebKit/WKWebViewConfiguration.h>
+#import <WebKit/WKNavigationDelegate.h>
 
 extern unsigned char libImageAscii[];
 extern unsigned char libImageAsciiExt[];
@@ -96,8 +100,10 @@ namespace AGK
 {   
     UIViewController *g_pViewController = 0;
 	UIView *g_pMainWindow = 0;
+    WKWebView *youtubeView = 0;
 	
     float m_fDeviceScale = 1.0f;
+	int g_iImmersiveMode = 0;
     
 	double dStartTime = 0;
 	double dCurrentTime = 0;
@@ -136,6 +142,8 @@ namespace AGK
     // cloud data
     int g_iCloudDataChanged = 0;
     int g_iCloudSetup = 0;
+    
+    uString g_sLastURLSchemeText;
     
 	class cSoundInst
 	{
@@ -204,6 +212,7 @@ namespace AGK
 	cSprite *pTextBackground = 0;
     bool g_bEditBoxHack = false;
     bool g_bMultiline = false;
+    int g_iInputType = 0;
     bool g_bPasswordMode = false;
 }
 
@@ -246,6 +255,7 @@ void SetSystemTextBox( const char* text )
     {
         m_bFinished = true;
         g_bMultiline = false;
+        g_iInputType = 0;
     }
     m_bSkipResign = false;
 }
@@ -255,12 +265,12 @@ void SetSystemTextBox( const char* text )
 	[ pTextView resignFirstResponder ];
 	[ pTextView removeFromSuperview ];
 	m_sText.SetStr( [pTextView.text cStringUsingEncoding:NSUTF8StringEncoding ] );
-	
     
     if ( !m_bSkipResign )
     {
         m_bFinished = true;
         g_bMultiline = false;
+        g_iInputType = 0;
     }
     m_bSkipResign = false;
 }
@@ -1333,10 +1343,26 @@ namespace AGK { AGKWatchDelegate *g_pWatchDelegate = 0; }
 }
 @end
 
+// text to speech
+namespace AGK
+{
+    AVSpeechSynthesizer *g_pTextToSpeech = 0;
+    float g_fSpeechRate = AVSpeechUtteranceDefaultSpeechRate;
+    AVSpeechSynthesisVoice *g_pSpeechVoice = nil;
+}
+
+struct AGKUtterance
+{
+    AVSpeechUtterance *utterance;
+    float delay; // in seconds
+};
+
 @interface AGKSpeechDelegate : NSObject <AVSpeechSynthesizerDelegate>
 {
     @public int m_iIsSpeaking;
-    @public AVSpeechUtterance *m_pLastUtterance;
+    int m_iFinished;
+    std::deque<AGKUtterance*> m_pUtterances;
+    float m_fLastTime;
 }
 @end
 namespace AGK { AGKSpeechDelegate *g_pSpeechDelegate = 0; }
@@ -1346,18 +1372,68 @@ namespace AGK { AGKSpeechDelegate *g_pSpeechDelegate = 0; }
 {
     self = [super init];
     m_iIsSpeaking = 0;
-    m_pLastUtterance = 0;
+    m_iFinished = 1;
+    m_fLastTime = agk::Timer();
     return self;
+}
+
+- (void)addUtterance:(AGKUtterance*)utterance
+{
+    m_pUtterances.push_back(utterance);
+    m_iIsSpeaking = 1;
+}
+
+- (void)update
+{
+    if ( !g_pTextToSpeech ) return;
+    
+    float timeDelta = agk::Timer() - m_fLastTime;
+    m_fLastTime = agk::Timer();
+    if ( timeDelta < 0 ) timeDelta = 0;
+    
+    if ( !m_iFinished ) return;
+    
+    if ( m_pUtterances.size() == 0 )
+    {
+        m_iIsSpeaking = 0;
+        return;
+    }
+    
+    AGKUtterance *pNextUtterance = m_pUtterances[0];
+    if ( pNextUtterance->delay > 0 ) pNextUtterance->delay -= timeDelta;
+    if ( pNextUtterance->delay <= 0 )
+    {
+        m_pUtterances.pop_front();
+        m_iFinished = 0;
+        [g_pTextToSpeech speakUtterance: pNextUtterance->utterance];
+        [pNextUtterance->utterance release];
+        delete pNextUtterance;
+    }
+}
+
+- (void)stopAll
+{
+    m_iIsSpeaking = 0;
+    m_iFinished = 1;
+    
+    for( int i = 0; i < m_pUtterances.size(); i++ )
+    {
+        [m_pUtterances[i]->utterance release];
+        delete m_pUtterances[i];
+    }
+    m_pUtterances.clear();
+    
+    if ( g_pTextToSpeech ) [g_pTextToSpeech stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance
 {
-    if ( utterance == m_pLastUtterance || !m_pLastUtterance ) m_iIsSpeaking = 0;
+    m_iFinished = 1;
 }
 
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance
 {
-    if ( utterance == m_pLastUtterance || !m_pLastUtterance ) m_iIsSpeaking = 0;
+    m_iFinished = 1;
 }
 @end
 
@@ -1455,7 +1531,14 @@ void agk::RestoreApp()
 
 void agk::SetImmersiveMode( int mode )
 {
-	
+	g_iImmersiveMode = mode ? 1 : 0;
+    if (@available(iOS 11.0, *))
+    {
+        if ([g_pViewController respondsToSelector:@selector(setNeedsUpdateOfHomeIndicatorAutoHidden)])
+        {
+            [ g_pViewController setNeedsUpdateOfHomeIndicatorAutoHidden ];
+        }
+	}
 }
 
 void agk::SetScreenResolution( int width, int height )
@@ -1482,6 +1565,20 @@ void agk::SetScreenResolution( int width, int height )
     agk::SetVideoDimensions(m_fVideoX, m_fVideoY, m_fVideoWidth, m_fVideoHeight);
     
     agk::ClearScreen();
+}
+
+char* agk::GetURLSchemeText()
+//****
+{
+	char* str = new char[g_sLastURLSchemeText.GetLength()+1];
+    strcpy( str, g_sLastURLSchemeText.GetStr() );
+	return str;
+}
+
+void agk::ClearURLSchemeText()
+//****
+{
+	g_sLastURLSchemeText.SetStr("");
 }
 
 void agk::GetDeviceName( uString &outString )
@@ -1648,6 +1745,11 @@ void agk::SetExpansionFileVersion(int version)
 }
 
 int agk::GetExpansionFileState()
+{
+	return 0;
+}
+
+int agk::GetExpansionFileError()
 {
 	return 0;
 }
@@ -2028,7 +2130,8 @@ void agk::PlatformInitGL( void* ptr )
     pTextView.autocorrectionType = UITextAutocorrectionTypeNo;
     
     g_bMultiline = false;
-	
+    g_iInputType = 0;
+    
 	pTextBackground = new cSprite();
 	pTextBackground->SetColor( 0,0,0, 128 );
 	pTextBackground->SetPosition( -m_iDisplayExtraX, -m_iDisplayExtraY );
@@ -2135,6 +2238,14 @@ void agk::UpdatePtr( void *ptr )
     
     agk::SetVideoDimensions(m_fVideoX, m_fVideoY, m_fVideoWidth, m_fVideoHeight);
     
+    if( youtubeView )
+    {
+        int width = g_pViewController.view.frame.size.width;
+        int height = g_pViewController.view.frame.size.height;
+        [youtubeView setFrame:CGRectMake(0,0,width,height)];
+        [youtubeView evaluateJavaScript:@"player.setSize(window.innerWidth, window.innerHeight-50);" completionHandler:nil];
+    }
+    
     agk::ClearScreen();
 }
 
@@ -2146,6 +2257,7 @@ void agk::UpdatePtr2( void *ptr )
 
 int agk::GetInternalDataI( int index )
 {
+	if ( index == 0 ) return g_iImmersiveMode;
 	return 0;
 }
 
@@ -2441,6 +2553,8 @@ void agk::PlatformSync()
                            (float) g_pMotionManager.magnetometerData.magneticField.z );
         }
     }
+    
+    if ( g_pSpeechDelegate ) [g_pSpeechDelegate update];
 }
 
 void agk::PlatformCompleteInputInit()
@@ -2488,7 +2602,7 @@ int agk::PlatformInputPointerPressed(float x, float y)
 			if ( pFound )
 			{
 				pFound->GetText( m_sCurrInput );
-                if ( g_bMultiline != pFound->GetMultiLine() )
+                if ( g_bMultiline != pFound->GetMultiLine() || g_iInputType != pFound->GetInputType() )
                 {
                     g_EventListener->m_bSkipResign = true;
                     if ( g_bMultiline )
@@ -2558,6 +2672,8 @@ void agk::PlatformStartTextInput( const char* sInitial )
     }
     else
     {
+        if ( g_iInputType == 1 ) pTextField.keyboardType = UIKeyboardTypeDecimalPad;
+        else pTextField.keyboardType = UIKeyboardTypeDefault;
         pTextField.secureTextEntry = g_bPasswordMode ? YES : NO;
         [ pTextField setText:pString ];
         
@@ -2580,6 +2696,8 @@ void agk::PlatformStopTextInput()
 		if( g_bMultiline ) [ pTextView resignFirstResponder ];
 		else [ pTextField resignFirstResponder ];
 	}
+    
+    g_iInputType = 0;
 }
 
 void agk::PlatformChangeTextInput( const char* str )
@@ -2624,8 +2742,8 @@ void agk::PlatformUpdateTextInput()
 void agk::PlatformDrawTextInput()
 {
 	// text input setup
-	float width = 250;
-	float height = 25;
+	float width = 2 * agk::GetDeviceDPI();
+	float height = 0.2f * agk::GetDeviceDPI();
 	if ( width > m_iRealDeviceWidth ) width = (float) m_iRealDeviceWidth;
 	float x = (m_iRealDeviceWidth - width) / 2.0f;
 	float y = m_iRealDeviceHeight/4.0f;
@@ -3183,6 +3301,33 @@ void agk::VibrateDevice( float seconds )
 	AudioServicesPlaySystemSound( kSystemSoundID_Vibrate );
 }
 
+void agk::SetClipboardText( const char* szText )
+//****
+{
+    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+    if ( !pasteboard ) return;
+    pasteboard.string = [NSString stringWithUTF8String:szText];
+}
+
+char* agk::GetClipboardText()
+//****
+{
+    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+    if ( pasteboard && pasteboard.string )
+    {
+        const char* text = [pasteboard.string UTF8String];
+        if ( text && *text )
+        {
+            char *str = new char[ strlen(text) + 1 ];
+            strcpy( str, text );
+            return str;
+        }
+    }
+    
+    char *str = new char[1]; *str = 0;
+    return str;
+}
+
 // Music
 
 void cMusicMgr::PlatformAddFile( cMusic *pMusic )
@@ -3586,26 +3731,9 @@ void cSoundMgr::PlatformInit()
 {
 	if ( !audioDevice )
 	{
-		AudioSessionInitialize ( NULL, NULL, NULL, NULL );
-								
-		//query audio hw to see if ipod is playing...
-		UInt32 propertySize = sizeof(audioIsAlreadyPlaying);
-		AudioSessionGetProperty(kAudioSessionProperty_OtherAudioIsPlaying, &propertySize, &audioIsAlreadyPlaying);	
-		
-		if(audioIsAlreadyPlaying)
-		{
-			//register session as ambient sound so our effects mix with ipod audio
-			UInt32	sessionCategory = kAudioSessionCategory_AmbientSound;
-			AudioSessionSetProperty(kAudioSessionProperty_AudioCategory, sizeof(sessionCategory), &sessionCategory);		
-		}
-		else
-		{
-			//register session as solo ambient sound so the ipod is silenced, and we can use hardware codecs for background audio
-			UInt32	sessionCategory = kAudioSessionCategory_SoloAmbientSound;
-			AudioSessionSetProperty(kAudioSessionProperty_AudioCategory, sizeof(sessionCategory), &sessionCategory);		
-		}
-		
-		AudioSessionSetActive (true);
+		AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+		[audioSession setCategory:AVAudioSessionCategoryAmbient error:nil];
+		[audioSession setActive:YES error:nil];
 		
 		audioDevice = alcOpenDevice(NULL); // select the "preferred device"
 		if(!audioDevice) agk::Error( "Failed to setup audio device" );
@@ -3624,12 +3752,12 @@ void cSoundMgr::PlatformInit()
 
 void cSoundMgr::AppPaused()
 {
-    alcMakeContextCurrent(NULL);
+    // don't modify sound settings, it breaks on some iOS devices
 }
 
 void cSoundMgr::AppResumed()
 {
-    if ( audioContext ) alcMakeContextCurrent(audioContext);
+    // don't try to re-initialise sound, it breaks on some iOS devices
 }
 
 void cSoundMgr::PlatformAddFile( cSoundFile *pSound )
@@ -3649,8 +3777,11 @@ void cSoundMgr::PlatformUpdate()
         
         if ( pSound->sourceID )
 		{
+			int state = 0;
+			alGetSourcei( pSound->sourceID, AL_SOURCE_STATE, &state );
+
 			//alGetSourcei(pSound->sourceID, AL_SOURCE_STATE, &state);
-            alGetSourcei(pSound->sourceID, AL_BUFFERS_PROCESSED, &buffers);
+			alGetSourcei(pSound->sourceID, AL_BUFFERS_PROCESSED, &buffers);
 			if ( buffers > 0 )
 			{
 				while( buffers > 0 )
@@ -3664,12 +3795,12 @@ void cSoundMgr::PlatformUpdate()
 				if ( pSound->m_iLoop == 1 || pSound->m_iLoopCount+1 < pSound->m_iLoop )
 				{
 					alSourceQueueBuffers(pSound->sourceID, 1, &(pSound->bufferID));
+					if ( state != AL_PLAYING ) alSourcePlay(pSound->sourceID);
+					state = AL_PLAYING;
 				}
 			}
-            
-            int state = 0;
-            alGetSourcei( pSound->sourceID, AL_SOURCE_STATE, &state );
-            if ( state != AL_PLAYING )
+
+			if ( state != AL_PLAYING )
             {
                 pSound->m_iLoopCount++;
                 
@@ -3976,6 +4107,122 @@ void cSoundMgr::StopInstance( UINT instance )
 	m_pUsedSounds = pSound;
 	
 	if ( pSound->m_pNextInst ) pSound->m_pNextInst->m_pPrevInst = pSound;
+}
+
+// youtube videos
+@interface YoutubeDelegate : NSObject <WKNavigationDelegate>
+{
+@public
+    
+}
+- (void)notifyDelegateOfYouTubeCallbackUrl: (NSURL *) url;
+@end
+
+@implementation YoutubeDelegate
+
+- (void)notifyDelegateOfYouTubeCallbackUrl: (NSURL *) url {
+    NSString *action = url.host;
+    
+    if ([action isEqual:@"back"])
+    {
+        if ( youtubeView )
+        {
+            [youtubeView removeFromSuperview];
+            [youtubeView release];
+            youtubeView = nil;
+        }
+        [g_pViewController setActive];
+    }
+}
+
+- (void)webView:(WKWebView *)webView
+decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+    NSURL *url = [navigationAction request].URL;
+    if ( [url.scheme isEqual:@"ytplayer"] )
+    {
+        [self notifyDelegateOfYouTubeCallbackUrl:url];
+        decisionHandler( WKNavigationActionPolicyCancel );
+    }
+    else
+    {
+        decisionHandler( WKNavigationActionPolicyAllow );
+    }
+}
+
+@end
+
+namespace AGK
+{
+    YoutubeDelegate *youtubeDelegate = nil;
+    
+    const char* szYoutubeFormat = "<html><head><style>\n\
+    body { margin: 0; width:100%%; height:100%%;  background-color:#000000; }\n\
+    html { width:100%%; height:100%%; background-color:#000000; }\n\
+    </style>\n\
+    <meta name=\"viewport\" content=\"initial-scale=1.0\"/>\n\
+    </head>\n\
+    <body>\n\
+    <div style=\"text-align:center;width:100%%;height:50px;background-color:#2D2D2D;color:#969696;font-family:Arial,sans-serif;font-size:34px;padding-top:8px\" onclick=\"window.location.href='ytplayer://back'\">Back</div>\n\
+    <div id=\"player\"></div>\n\
+    \n\
+    <script src=\"https://www.youtube.com/iframe_api\"></script>\n\
+    <script>\n\
+    var player;\n\
+    function onYouTubeIframeAPIReady() {\n\
+    player = new YT.Player('player', {height:'100%%',\n\
+    width:'100%%',\n\
+    videoId:'%s',\n\
+    playerVars:{\n\
+    autoplay: 0,\n\
+    playsinline: 0,\n\
+    rel: 0,\n\
+    start: %d \n\
+    },\n\
+    events:{'onReady': onReady, 'onStateChange': onStateChange}\n\
+    });\n\
+    player.setSize(window.innerWidth, window.innerHeight-50);\n\
+    }\n\
+    \n\
+    function onReady(event) {\n\
+    //event.target.playVideo();\n\
+    }\n\
+    \n\
+    function onStateChange(event) {\n\
+    //event.data\n\
+    }\n\
+    \n\
+    window.onresize = function() {\n\
+    player.setSize(window.innerWidth, window.innerHeight-50);\n\
+    }\n\
+    </script>\n\
+    </body>\n\
+    </html>";
+}
+
+void agk::PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime )
+//****
+{
+    if ( !youtubeDelegate ) youtubeDelegate = [[YoutubeDelegate alloc] init];
+    
+    NSString *sYoutubeHTML = [NSString stringWithFormat:[NSString stringWithUTF8String:szYoutubeFormat], videoID, (int)startTime];
+    
+    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+    config.allowsInlineMediaPlayback = NO;
+    config.mediaPlaybackRequiresUserAction = NO;
+    config.requiresUserActionForMediaPlayback = NO;
+    config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+    int width = g_pViewController.view.frame.size.width;
+    int height = g_pViewController.view.frame.size.height;
+    youtubeView = [[WKWebView alloc] initWithFrame:CGRectMake(0, 0, width,height) configuration: config];
+    youtubeView.navigationDelegate = youtubeDelegate;
+    youtubeView.scrollView.scrollEnabled = NO;
+    youtubeView.scrollView.bounces = NO;
+    youtubeView.autoresizingMask = (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
+    [ youtubeView loadHTMLString:sYoutubeHTML baseURL:[NSURL URLWithString:@"about:blank"] ];
+    [ g_pViewController setInactive ];
+    [ g_pViewController.view addSubview: youtubeView ];
 }
 
 // video commands
@@ -4307,7 +4554,10 @@ float agk::GetVideoHeight()
 void agk::SetVideoPosition( float seconds )
 //****
 {
-	
+	if ( !videoplayer ) return;
+    
+    int32_t timeScale = videoplayer.currentItem.asset.duration.timescale;
+    [videoplayer seekToTime:CMTimeMakeWithSeconds(seconds, timeScale) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
 }
 
 // Screen recording
@@ -4389,13 +4639,6 @@ char* agk::ReceiveSmartWatchData()
 }
 
 // Text to speech
-namespace AGK
-{
-    AVSpeechSynthesizer *g_pTextToSpeech = 0;
-    float g_fSpeechRate = AVSpeechUtteranceDefaultSpeechRate;
-    AVSpeechSynthesisVoice *g_pSpeechVoice = nil;
-}
-
 void agk::TextToSpeechSetup()
 //****
 {
@@ -4418,22 +4661,28 @@ void agk::Speak( const char *text )
     AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:[NSString stringWithUTF8String:text]];
     [utterance setRate:g_fSpeechRate];
     [utterance setVoice:g_pSpeechVoice];
-    g_pSpeechDelegate->m_iIsSpeaking = 1;
-    g_pSpeechDelegate->m_pLastUtterance = utterance;
-    [g_pTextToSpeech speakUtterance:utterance];
+    [utterance retain];
+    AGKUtterance *newUtterance = new AGKUtterance();
+    newUtterance->utterance = utterance; 
+    newUtterance->delay = 0;
+    [g_pSpeechDelegate addUtterance:newUtterance];
 }
 
 void agk::Speak( const char *text, int delay )
 //****
 {
+    // using the AVSpeechUtterance delay feature causes a bug if the utterance is stopped whilst in the delay phase
+    // which will cause speech to never be spoken again, so use our own delay method instead
+    
     if ( !g_pTextToSpeech ) return;
     AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:[NSString stringWithUTF8String:text]];
     [utterance setRate:g_fSpeechRate];
     [utterance setVoice:g_pSpeechVoice];
-	[utterance setPreUtteranceDelay:delay / 1000.0];
-    g_pSpeechDelegate->m_iIsSpeaking = 1;
-    g_pSpeechDelegate->m_pLastUtterance = utterance;
-    [g_pTextToSpeech speakUtterance:utterance];
+    [utterance retain];
+    AGKUtterance *newUtterance = new AGKUtterance();
+    newUtterance->utterance = utterance;
+    newUtterance->delay = delay / 1000.0;
+    [g_pSpeechDelegate addUtterance:newUtterance];
 }
 
 void agk::SetSpeechRate( float rate )
@@ -4459,8 +4708,19 @@ char* agk::GetSpeechVoiceLanguage( int index )
     }
 
     AVSpeechSynthesisVoice* voice = [[AVSpeechSynthesisVoice speechVoices] objectAtIndex:index];
+	if ( !voice )
+	{
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
     
     const char* lang = [[voice language] UTF8String];
+	if ( !lang )
+	{
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
+
     char* str = new char[ strlen(lang)+1 ];
     strcpy( str, lang );
     return str;
@@ -4476,10 +4736,43 @@ char* agk::GetSpeechVoiceName( int index )
     }
     
     AVSpeechSynthesisVoice* voice = [[AVSpeechSynthesisVoice speechVoices] objectAtIndex:index];
+	if ( !voice || ![voice respondsToSelector:@selector(name)] || ![voice name] )
+	{
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
     
     const char* name = [[voice name] UTF8String];
+	if ( !name )
+	{
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
+    
     char* str = new char[ strlen(name)+1 ];
     strcpy( str, name );
+    return str;
+}
+
+char* agk::GetSpeechVoiceID( int index )
+//****
+{
+    if ( index < 0 || index >= [[AVSpeechSynthesisVoice speechVoices] count] )
+    {
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
+    
+    AVSpeechSynthesisVoice* voice = [[AVSpeechSynthesisVoice speechVoices] objectAtIndex:index];
+    if ( !voice || ![voice respondsToSelector:@selector(identifier)] || ![voice identifier] )
+    {
+        char *str = new char[1]; *str = 0;
+        return str;
+    }
+    
+    const char* sID = [[voice identifier] UTF8String];
+    char* str = new char[ strlen(sID)+1 ];
+    strcpy( str, sID );
     return str;
 }
 
@@ -4494,6 +4787,17 @@ void agk::SetSpeechLanguage( const char* lang )
     [g_pSpeechVoice retain];
 }
 
+void agk::SetSpeechLanguageByID( const char* sID )
+//****
+{
+	if ( !g_pTextToSpeech ) return;
+    if ( g_pSpeechVoice ) [g_pSpeechVoice release];
+    g_pSpeechVoice = nil;
+    if ( ![AVSpeechSynthesisVoice respondsToSelector:@selector(voiceWithIdentifier:)] ) return;
+    g_pSpeechVoice = [AVSpeechSynthesisVoice voiceWithIdentifier:[NSString stringWithUTF8String:sID]];
+    [g_pSpeechVoice retain];
+}
+
 int agk::IsSpeaking()
 //****
 {
@@ -4505,9 +4809,8 @@ int agk::IsSpeaking()
 void agk::StopSpeaking()
 //****
 {
-	if ( !g_pTextToSpeech ) return;
-    [g_pTextToSpeech stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-    if ( g_pSpeechDelegate ) g_pSpeechDelegate->m_iIsSpeaking = 0;
+	if ( !g_pSpeechDelegate ) return;
+    [g_pSpeechDelegate stopAll];
 }
 
 int uString::ToInt() const
@@ -5913,8 +6216,12 @@ void cEditBox::PlatformStartText()
 	// if the edit box is in the lower half of the screen use the normal text entry, unless alternate methods are turned off
     
     g_bMultiline = GetMultiLine();
+    g_iInputType = GetInputType();
+
+	float topY = m_fY+m_fHeight;
+	if ( !m_bFixed ) topY = agk::WorldToScreenY( topY );
     
-	if ( !m_bUseAlternateInput || m_fY < agk::GetVirtualHeight()/2 )
+	if ( !m_bUseAlternateInput || topY < agk::GetVirtualHeight()/2 )
 	{
 		g_bEditBoxHack = true;
 		agk::PlatformDrawTextInput();
@@ -5924,7 +6231,7 @@ void cEditBox::PlatformStartText()
     agk::StartTextInput( m_sCurrInput );
     
 	// StartTextInput resets this flag
-	if ( !m_bUseAlternateInput || m_fY < agk::GetVirtualHeight()/2 ) g_bEditBoxHack = true;
+	if ( !m_bUseAlternateInput || topY < agk::GetVirtualHeight()/2 ) g_bEditBoxHack = true;
     
     m_iCursorPos = m_sCurrInput.GetNumChars();
     m_iLastLength = m_sCurrInput.GetNumChars();
@@ -6163,6 +6470,43 @@ void agk::ShareImageAndText( const char* szFilename, const char* szText )
     [activityVc release];
 }
 
+void agk::ShareFile( const char* szFilename )
+//****
+{
+	uString sPath( szFilename );
+    if ( !GetRealPath( sPath ) )
+	{
+		uString err; err.Format( "Could not find file at path: %s", szFilename );
+		agk::Error( err );
+		return;
+	}
+    
+    NSString *filePath = [NSString stringWithUTF8String:sPath.GetStr()];
+    NSURL *file = [NSURL fileURLWithPath:filePath];
+	NSMutableArray *postItems = [NSMutableArray array];
+	[postItems addObject:file];
+    
+    UIActivityViewController *activityVc = [[UIActivityViewController alloc] initWithActivityItems:postItems applicationActivities:nil];
+    
+    [activityVc setCompletionHandler:^(NSString *actType, BOOL completed){ [g_pViewController setActive]; }];
+    
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad && [activityVc respondsToSelector:@selector(popoverPresentationController)] )
+    {
+        UIPopoverController *popup = [[UIPopoverController alloc] initWithContentViewController:activityVc];
+        
+        [popup presentPopoverFromRect:CGRectMake(g_pViewController.view.frame.size.width/2, g_pViewController.view.frame.size.height/4, 0, 0)
+                               inView:[UIApplication sharedApplication].keyWindow.rootViewController.view permittedArrowDirections:UIPopoverArrowDirectionUnknown animated:YES];
+        [g_pViewController setInactive];
+    }
+    else
+    {
+        [[UIApplication sharedApplication].keyWindow.rootViewController presentViewController:activityVc animated:YES completion:nil];
+        [g_pViewController setInactive];
+    }
+    
+    [activityVc release];
+}
+
 void agk::FacebookActivateAppTracking()
 //****
 {
@@ -6188,9 +6532,26 @@ int agk::GetInternetState()
         while (temp_addr != NULL) {
             if( temp_addr->ifa_addr->sa_family == AF_INET) {
                 sIP.SetStr( inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr) );
-                if ( sIP.CompareTo( "0.0.0.0" ) != 0 )
+				if (sIP.CompareTo( "127.0.0.1" ) != 0 && sIP.CompareTo( "0.0.0.0" ) != 0 )
                 {
 					freeifaddrs(interfaces);
+					return 1;
+                }
+            }
+			if( temp_addr->ifa_addr->sa_family == AF_INET6) {
+                char szIP[ 65 ];
+				inet_ntop( AF_INET6, &(((struct sockaddr_in6*)temp_addr->ifa_addr)->sin6_addr), szIP, 65 );
+                int level = 0;
+                if ( strncmp( szIP, "::1", 3 ) == 0 ) level = -1; // loopback
+                else if ( strncmp( szIP, "ff", 2 ) == 0 ) level = -1; // multicast address
+                else if ( strncmp( szIP, "fe", 2 ) == 0 ) level = 1; // link local address
+                else if ( strncmp( szIP, "fc", 2 ) == 0 ) level = 2; // site local address
+                else if ( strncmp( szIP, "fd", 2 ) == 0 ) level = 2; // site local address
+                else level = 3;
+                                
+                if ( level > 2 )
+                {
+                    freeifaddrs(interfaces);
 					return 1;
                 }
             }
@@ -6444,6 +6805,11 @@ void agk::GameCenterLogin()
 #endif
 }
 
+void agk::GameCenterLogout()
+{
+	
+}
+
 int agk::GetGameCenterLoggedIn()
 {
 #ifndef LITEVERSION
@@ -6656,7 +7022,7 @@ int agk::PlatformGetIPv6( uString &sIP, int *iInterface )
 
 int agk::CheckPermission( const char* szPermission )
 {
-	return 1;
+	return 2;
 }
 
 void agk::RequestPermission( const char* szPermission )

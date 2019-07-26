@@ -28,6 +28,7 @@ cEditBox::cEditBox()
     m_bSupportsExtendedAscii = false;
     m_bSupportWarned = false;
 	m_iWrapMode = 0;
+	m_iInputType = 0;
 	m_iTextChanged = 0;
     m_iLastLength = 0;
 	m_bFlags = 0;
@@ -357,6 +358,11 @@ void cEditBox::SetWrapMode( int mode )
 	m_iWrapMode = mode; 
 	if ( m_bMultiLine || m_iWrapMode==1 ) m_pInputText->SetMaxWidth( m_fWidth - m_fTextSize/5 );
 	else m_pInputText->SetMaxWidth( 0 );
+}
+
+void cEditBox::SetInputType( int mode ) 
+{ 
+	m_iInputType = mode; 
 }
 
 void cEditBox::SetMaxLines( UINT lines )
@@ -764,7 +770,7 @@ void cEditBox::Draw()
 	int iScissorWidth = 0;
 	int iScissorHeight = 0;
 
-	if ( (m_fScissorX2 == m_fScissorX) || (m_fScissorY == m_fScissorY2) )
+	if ( (m_fScissorX2 == m_fScissorX) && (m_fScissorY == m_fScissorY2) )
 	{
 		agk::ResetScissor();
 	}
@@ -900,14 +906,20 @@ void cEditBox::Draw()
 	else
 	{
 		float padX = m_fTextSize/5;
-		if ( posX + m_pInputText->GetSize() > m_fX + m_fWidth )
+		float padX2 = m_fTextSize;
+		if ( m_fWidth < m_fTextSize*2 )
 		{
-			float newX = m_pInputText->GetX() - ((posX + m_pInputText->GetSize()) - (m_fX + m_fWidth));
+			padX2 = m_fWidth / 2;
+		}
+
+		if ( posX + padX2 > m_fX + m_fWidth )
+		{
+			float newX = m_pInputText->GetX() - ((posX + padX2) - (m_fX + m_fWidth));
 			m_pInputText->SetPosition( newX, m_pInputText->GetY() );
 		}
-		else if ( posX < m_fX + m_pInputText->GetSize() )
+		else if ( posX < m_fX + padX2 )
 		{
-			float newX = m_pInputText->GetX() + ((m_fX + m_pInputText->GetSize()) - posX);
+			float newX = m_pInputText->GetX() + ((m_fX + padX2) - posX);
 			if ( newX > m_fX + padX/2 ) newX = m_fX + padX/2;
 			m_pInputText->SetPosition( newX, m_pInputText->GetY() );
 		}

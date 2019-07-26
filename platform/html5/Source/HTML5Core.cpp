@@ -308,6 +308,19 @@ void agk::SetScreenResolution( int width, int height )
 	// do nothing on linux
 }
 
+char* agk::GetURLSchemeText()
+//****
+{
+	char* str = new char[1]; *str = 0;
+	return str;
+}
+
+void agk::ClearURLSchemeText()
+//****
+{
+
+}
+
 void agk::GetDeviceName( uString &outString )
 //****
 {
@@ -401,6 +414,11 @@ void agk::SetExpansionFileVersion(int version)
 }
 
 int agk::GetExpansionFileState()
+{
+	return 0;
+}
+
+int agk::GetExpansionFileError()
 {
 	return 0;
 }
@@ -1538,6 +1556,19 @@ void agk::VibrateDevice( float seconds )
 	// do nothing
 }
 
+void agk::SetClipboardText( const char* szText )
+//****
+{
+
+}
+
+char* agk::GetClipboardText()
+//****
+{
+	char *str = new char[1]; *str = 0;
+	return str;
+}
+
 // Music
 
 void cMusicMgr::PlatformAddFile( cMusic *pMusic )
@@ -2380,13 +2411,31 @@ void cSoundMgr::StopInstance( UINT instance )
 	if ( pSound->m_pNextInst ) pSound->m_pNextInst->m_pPrevInst = pSound;
 }
 
+// youtube videos
+
+void agk::PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime )
+//****
+{
+	uString sURL;
+	sURL.Format( "https://www.youtube.com/watch?v=%s&t=%d", videoID, (int)startTime );
+	OpenBrowser( sURL );
+}
+
 // video commands
+int g_iVideoStarted = 0;
 int agk::LoadVideo( const char *szFilename )
 //****
 {
-	//agk::Message( "AGK does not currently support playing videos in HTML5" );
+	EM_ASM_({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video == null ) console.log("AGKVideo tag is missing on this page, videos will not play");
+		video.autoplay = false;
+		video.loop = false;
+		video.muted = false;
+		video.src = Pointer_stringify($0); 
+	}, szFilename);
 
-	return 0;
+	return 1;
 }
 
 void agk::ChangeVideoPointer( void *ptr )
@@ -2396,13 +2445,28 @@ void agk::ChangeVideoPointer( void *ptr )
 
 void agk::HandleVideoEvents()
 {
-	// todo
+	
 }
 
 void agk::DeleteVideo()
 //****
 {
-	// todo
+	EM_ASM({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null ) 
+		{
+			video.pause();
+			video.src = "";
+		}
+	});
+	g_iVideoStarted = 0;
+
+	if ( m_pVideoTexture ) 
+	{
+		m_cImageList.RemoveItem( m_pVideoTexture->m_iID );
+		delete m_pVideoTexture; 
+		m_pVideoTexture = 0;
+	}
 }
 
 void agk::SetVideoDimensions( float x, float y, float width, float height )
@@ -2419,91 +2483,167 @@ void agk::SetVideoDimensions( float x, float y, float width, float height )
 		int iY = agk::ScreenToDeviceY( y );
 		int iWidth = agk::ScreenToDeviceX( x+width ) - iX;
 		int iHeight = agk::ScreenToDeviceY( y+height ) - iY;
-
-		// todo
 	}
 }
 
 void agk::VideoUpdate()
 {
-	// do nothing
+	if ( !m_pVideoTexture || !m_pVideoTexture->GetTextureID() ) return;
+	if ( !g_iVideoStarted ) return;
+	
+	EM_ASM_({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null ) 
+		{
+			if ( video.src != null && video.src != "" && !video.ended )
+			{
+				var canvas = document.getElementById('canvas');
+				var gl = canvas.getContext('webgl');
+				gl.bindTexture(gl.TEXTURE_2D, GL.textures[$0]);
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); 
+			}
+		}
+	}, m_pVideoTexture->GetTextureID());
 }
 
 void agk::PlayVideoToImage( UINT imageID )
 //****
 {
-	agk::Message("Video to texture is not currently supported on HTML5");
+	cImage *pImage = m_cImageList.GetItem( imageID );
+	if ( pImage && pImage != m_pVideoTexture )
+	{
+		agk::Error( "Failed to play video to image, image already exists" );
+		return;
+	}
 
-	//m_iVideoPlayMode = 2;
+	// create video image if necessary
+	if ( m_pVideoTexture ) 
+	{
+		if ( m_pVideoTexture->m_iID != imageID ) agk::Warning( "Cannot change video image ID during playback, call DeleteVideo first then PlayVideoToImage with the new ID" );
+	}
+	else
+	{
+		unsigned int color = 0;
+		m_pVideoTexture = new cImage();
+		m_pVideoTexture->CreateBlankImage( 1, 1, 0, 0 );
+		m_pVideoTexture->LoadFromData( 1, 1, &color, 0 );
+		m_pVideoTexture->m_iID = imageID;
+		m_cImageList.AddItem( m_pVideoTexture, imageID );
+	} 
+
+	EM_ASM({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null )
+		{
+			video.play();
+		}
+	});
+	g_iVideoStarted = 1;
 }
 
 void agk::PlayVideo()
 //****
 {
-	// todo
-
-	//m_iVideoPlayMode = 1;
+	agk::Error( "PlayVideo is not supported on HTML5, use PlayVideoToImage instead" );
 }
 
 void agk::PauseVideo()
 //****
 {
-	// todo
+	EM_ASM({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null ) 
+		{
+			video.pause();
+		}
+	});
 }
 
 void agk::StopVideo()
 //****
 {
-	// todo
-
-	m_iVideoPlayMode = 0;
+	EM_ASM({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null ) 
+		{
+			video.pause();
+			video.src = "";
+		}
+	});
+	g_iVideoStarted = 0;
 }
 
 int agk::GetVideoPlaying()
 //****
 {
-	// todo
-	return 0;
+	if ( !g_iVideoStarted ) return 0;
+	
+	int res = EM_ASM_INT_V({ 
+		var video = document.getElementById("AGKVideo");
+		var result = 0;
+		if ( video != null && video.src != null && video.src != "" && !video.ended ) result = 1;
+		return result;
+	});
+	
+	return res;
 }
 
 float agk::GetVideoPosition()
 //****
 {
-	// todo
-	return 0;
+	return EM_ASM_DOUBLE_V({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video == null || video.src == null || video.src == "" ) return 0;
+		else return video.currentTime;
+	});
 }
 
 float agk::GetVideoDuration()
 //****
 {
-	// todo
-	return 0;
+	return EM_ASM_DOUBLE_V({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video == null || video.src == null || video.src == "" ) return 0;
+		else return video.duration;
+	});
 }
 
 void agk::SetVideoVolume( float volume )
 //****
 {
-	// todo
+	EM_ASM_({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null ) video.volume = $0 / 100.0;
+	}, volume);
 }
 
 float agk::GetVideoWidth()
 //****
 {
-	// todo
-	return -1;
+	return EM_ASM_INT_V({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video == null || video.src == null || video.src == "" ) return 0;
+		else return video.width;
+	});
 }
 
 float agk::GetVideoHeight()
 //****
 {
-	// todo
-	return -1;
+	return EM_ASM_INT_V({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video == null || video.src == null || video.src == "" ) return 0;
+		else return video.height;
+	});
 }
 
 void agk::SetVideoPosition( float seconds )
 //****
 {
-	
+	EM_ASM_({ 
+		var video = document.getElementById("AGKVideo");
+		if ( video != null && video.src != null && video.src != "" ) video.currentTime = $0;
+	}, seconds);
 }
 
 // Screen recording
@@ -2605,7 +2745,20 @@ char* agk::GetSpeechVoiceName( int index )
     return str;
 }
 
+char* agk::GetSpeechVoiceID( int index )
+//****
+{
+    char *str = new char[1]; *str = 0;
+    return str;
+}
+
 void agk::SetSpeechLanguage( const char* lang )
+//****
+{
+
+}
+
+void agk::SetSpeechLanguageByID( const char* sID )
 //****
 {
 
@@ -2805,15 +2958,37 @@ int agk::PlatformCreateRawPath( const char* path )
 		return 0;
 	}
 
-	const char *origPath = path;
-
-	chdir( "/" );
-	path++;
-
 	uString sPath( path );
 	sPath.Replace( '\\', '/' );
+	sPath.Trunc( '/' );
+	if ( sPath.GetLength() == 0 ) sPath.SetStr( "/" );
+
+	int fd = open( sPath.GetStr(), O_RDONLY | O_CLOEXEC );
+	if ( fd >= 0 ) 
+	{
+		close( fd );
+		return 1; // already exists
+	}
+
+	int found = 0;
+	do
+	{
+		sPath.Trunc( '/' );
+		if ( sPath.GetLength() == 0 ) sPath.SetStr( "/" );
+		fd = open( sPath.GetStr(), O_RDONLY | O_CLOEXEC );
+		if ( fd >= 0 ) found = 1;
+	} while( sPath.GetLength() > 1 && !found );
 	
-	const char *szRemaining = sPath.GetStr();
+	if ( !found )
+	{
+		uString err; err.Format( "Failed to create path \"%s\", the app may not have permissions to create folders in the part that exists", path );
+		agk::Error( err );
+		return 0;
+	}
+
+	uString sPath2( path );
+	sPath2.Replace( '\\', '/' );
+	const char *szRemaining = sPath2.GetStr() + sPath.GetLength() + 1;
 	const char *szSlash;
 	char szFolder[ MAX_PATH ];
 	while ( (szSlash = strchr( szRemaining, '/' )) )
@@ -2821,7 +2996,7 @@ int agk::PlatformCreateRawPath( const char* path )
 		UINT length = (UINT)(szSlash-szRemaining);
 		if ( length == 0 )
 		{
-			uString err; err.Format( "Invalid path \"%s\", folder names must have at least one character", origPath );
+			uString err; err.Format( "Invalid path \"%s\", folder names must have at least one character", path );
 			agk::Error( err );
 			return 0;
 		}
@@ -2829,21 +3004,26 @@ int agk::PlatformCreateRawPath( const char* path )
 		strncpy( szFolder, szRemaining, length );
 		szFolder[ length ] = '\0';
 
-		if ( chdir( szFolder ) < 0 )
+		int newFd = openat( fd, szFolder, O_RDONLY | O_CLOEXEC );
+		if ( newFd < 0 )
 		{
-			mkdir( szFolder, 0777 );
-			if ( chdir( szFolder ) < 0 )
+			mkdirat( fd, szFolder, 0777 );
+			newFd = openat( fd, szFolder, O_RDONLY | O_CLOEXEC );
+			if ( newFd < 0 )
 			{
-				uString err; err.Format( "Failed to create folder \"%s\" in path \"%s\", the app may not have permission to create it", szFolder, origPath );
+				uString err; err.Format( "Failed to create folder \"%s\" in path \"%s\", the app may not have permission to create it", szFolder, path );
 				agk::Error( err );
 				return 0;
 			}
 		}
 
+		close( fd );
+		fd = newFd;
+
 		szRemaining = szSlash+1;
 	}
 
-	chdir( szWriteDir );
+	close( fd );
 
 	return 1;
 }
@@ -4105,6 +4285,12 @@ void agk::ShareImageAndText( const char* szFilename, const char* szText )
 
 }
 
+void agk::ShareFile( const char* szFilename )
+//****
+{
+
+}
+
 void agk::FacebookActivateAppTracking()
 //****
 {
@@ -4655,6 +4841,11 @@ void agk::GameCenterLogin()
 
 }
 
+void agk::GameCenterLogout()
+{
+	
+}
+
 int agk::GetGameCenterLoggedIn()
 {
 	return 0;
@@ -4699,7 +4890,7 @@ void agk::GameCenterAchievementsReset ( void )
 
 int agk::CheckPermission( const char* szPermission )
 {
-	return 1;
+	return 2;
 }
 
 void agk::RequestPermission( const char* szPermission )

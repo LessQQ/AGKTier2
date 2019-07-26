@@ -4,6 +4,7 @@
 #include "Common.h"
 
 #define AGK_NUM_JOYSTICKS 8
+#define AGK_MAX_JOYSTICK_BUTTONS 64
 
 namespace AGK
 {
@@ -138,6 +139,7 @@ namespace AGK
 			int m_iDeviceType;
 
 			int m_iConnected;
+			uString m_sName;
 
 			float m_fX;
 			float m_fY;
@@ -147,10 +149,13 @@ namespace AGK
 			float m_fRY;
 			float m_fRZ;
 
+			int m_iSlider[ 2 ];
+			int m_iPOV[ 4 ];
+
 			UINT m_iNumButtons;
-			char m_iPrevButtons[ 32 ];
-			char m_iButtons[ 32 ];
-			char m_iResetButtons[ 32 ];
+			char m_iPrevButtons[ AGK_MAX_JOYSTICK_BUTTONS ];
+			char m_iButtons[ AGK_MAX_JOYSTICK_BUTTONS ];
+			char m_iResetButtons[ AGK_MAX_JOYSTICK_BUTTONS ];
 
 			void PlatformUpdate();
 			//void PlatformDelete();
@@ -169,6 +174,8 @@ namespace AGK
 			static void DetectJoysticks();
 
 			int GetConnected() { return m_iConnected; }
+			const char* GetName() { return m_sName.GetStr(); }
+			void SetName( const char* name ) { m_sName.SetStr( name ); }
 
 			float GetX();
 			float GetY();
@@ -178,24 +185,27 @@ namespace AGK
 			float GetRY();
 			float GetRZ();
 
+			int GetSlider( UINT slider );
+			int GetPOV( UINT pov );
+
 			UINT GetNumButtons() { return m_iNumButtons; }
 			bool GetButtonPressed( UINT button )
 			{
-				if ( button > 32 ) return 0;
+				if ( button >= AGK_MAX_JOYSTICK_BUTTONS ) return 0;
 				if ( !m_iPrevButtons[ button ] && m_iButtons[ button ] ) return true;
 				return false;
 			}
 
 			bool GetButtonReleased( UINT button )
 			{
-				if ( button > 32 ) return 0;
+				if ( button >= AGK_MAX_JOYSTICK_BUTTONS ) return 0;
 				if ( m_iPrevButtons[ button ] && !m_iButtons[ button ] ) return true;
 				return false;
 			}
 
 			bool GetButtonState( UINT button )
 			{
-				if ( button > 32 ) return 0;
+				if ( button >= AGK_MAX_JOYSTICK_BUTTONS ) return 0;
 				return m_iButtons[ button ] != 0;
 			}
 

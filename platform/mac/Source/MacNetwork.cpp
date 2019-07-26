@@ -7,30 +7,77 @@ using namespace AGK;
 // UDPManager
 //*********************
 
-UDPManager::UDPManager( UINT port )
+UDPManager::UDPManager( const char* szIP, UINT listenPort )
 {
-	if ( port == 0 ) port = 65535;
-	if ( port > 65535 ) port = 65535;
-	m_port = port;
-	
-	m_socket = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+	m_iValid = 0;
+	if ( listenPort == 0 ) listenPort = 65535;
+	if ( listenPort > 65535 ) listenPort = 65535;
+	m_port = listenPort;
+
+	if ( !szIP || !*szIP ) szIP = "anyip4";
+
+	m_iIPv6 = 0;
+	if ( strcmp(szIP,"anyip6") == 0 || strchr(szIP,':') ) m_iIPv6 = 1;
+
+	unsigned short family;
+	int size = 0;
+	sockaddr_storage addr;
+	if ( !m_iIPv6 )
+	{
+		family = AF_INET;
+		sockaddr_in *addrv4 = (sockaddr_in*) &addr;
+		addrv4->sin_family = family;
+		addrv4->sin_port = htons( m_port );
+		if ( strcmp(szIP,"anyip4") == 0 ) addrv4->sin_addr.s_addr = INADDR_ANY;
+		else addrv4->sin_addr.s_addr = inet_addr( szIP );
+		size = sizeof(sockaddr_in);
+	}
+	else
+	{
+		family = AF_INET6;
+		sockaddr_in6 *addrv6 = (sockaddr_in6*) &addr;
+		memset(addrv6, 0, sizeof(sockaddr_in6));
+		addrv6->sin6_family = family;
+		addrv6->sin6_port = htons( m_port );
+		if ( strcmp( szIP, "anyip6" ) == 0 ) addrv6->sin6_addr = in6addr_any;
+		else inet_pton( AF_INET6, szIP, &(addrv6->sin6_addr) );
+		size = sizeof(sockaddr_in6);
+	}
+
+	m_socket = socket( family, SOCK_DGRAM, IPPROTO_UDP );
 	if ( m_socket == INVALID_SOCKET ) 
 	{
 		agk::Warning( "Failed to create UDP socket" );
 		return;
 	}
+
+	int value = 1;
+    setsockopt( m_socket, SOL_SOCKET, SO_REUSEADDR, (char*)&value, sizeof(value) );
 	
-	sockaddr_in addr;
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons( m_port );
-	addr.sin_addr.s_addr = INADDR_ANY;
-	if ( bind( m_socket, (sockaddr*) &addr, sizeof(addr) ) == SOCKET_ERROR )
+	if ( family == AF_INET6 ) 
+	{
+		int value = 1;
+		setsockopt( m_socket, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&value, sizeof(value) ); // don't listen on IPV4 addresses
+
+		// if address is multicast then join the group
+		if ( strncmp(szIP,"FF",2) == 0 || strncmp(szIP,"ff",2) == 0 ) 
+		{
+			ipv6_mreq mreq;
+			mreq.ipv6mr_interface = 0;
+			inet_pton( AF_INET6, szIP, &(mreq.ipv6mr_multiaddr) );
+			setsockopt(m_socket, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char*)&mreq, sizeof(mreq)) ;
+		}
+	}
+
+	if ( bind( m_socket, (sockaddr*) &addr, size ) == SOCKET_ERROR )
 	{
 		close( m_socket );
 		m_socket = INVALID_SOCKET;
 		agk::Warning( "Failed to bind UDP socket" );
 		return;
 	}
+
+	m_iValid = 1;
 }
 
 UDPManager::~UDPManager()
@@ -42,48 +89,63 @@ UDPManager::~UDPManager()
 	}
 }
 
-bool UDPManager::SendPacket( const char *IP, const AGKPacket *packet )
+bool UDPManager::SendPacket( const char *IP, UINT port, const AGKPacket *packet )
 {
 	if ( m_socket == INVALID_SOCKET )
 	{
 		agk::Error( "Tried to send UDP packet on an uninitialised socket" );
 		return false;
 	}
-	
+
 	if ( !IP ) return false;
+	if ( port == 0 || port > 65535 ) return false;
 	if ( !packet ) return false;
+
+	int size;
+	sockaddr_storage addr;
+	if ( !m_iIPv6 )
+	{
+		sockaddr_in *addrv4 = (sockaddr_in*) &addr;
+		addrv4->sin_family = AF_INET;
+		addrv4->sin_port = htons( port );
+		addrv4->sin_addr.s_addr = inet_addr( IP );
+		size = sizeof(sockaddr_in);
+	}
+	else
+	{
+		sockaddr_in6 *addrv6 = (sockaddr_in6*) &addr;
+		memset(addrv6, 0, sizeof(sockaddr_in6));
+		addrv6->sin6_family = AF_INET6;
+		addrv6->sin6_port = htons( port );
+		inet_pton( AF_INET6, IP, &(addrv6->sin6_addr) );
+		size = sizeof(sockaddr_in6);
+	}
 	
-	sockaddr_in addr;
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons( m_port );
-	addr.sin_addr.s_addr = inet_addr( IP );
-	int length = sizeof( addr );
-	int result = sendto( m_socket, packet->GetBuffer(), packet->GetPos(), 0, (sockaddr*)&addr, length );
+	int result = sendto( m_socket, packet->GetBuffer(), packet->GetPos(), 0, (sockaddr*)&addr, size );
 	if ( result == 0 || result == SOCKET_ERROR ) return false;
 	return true;
 }
 
-bool UDPManager::RecvPacket( char *fromIP, AGKPacket *packet )
+bool UDPManager::RecvPacket( char *fromIP, int *fromPort, AGKPacket *packet )
 {
 	if ( m_socket == INVALID_SOCKET )
 	{
-		agk::Error( "Tried to send UDP packet on an uninitialised socket" );
+		agk::Error( "Tried to receive UDP packet on an uninitialised socket" );
 		return false;
 	}
-	
-	if ( !fromIP ) return false;
+
 	if ( !packet ) return false;
-	
+
 	unsigned long waiting = 0;
 	if ( ioctl( m_socket, FIONREAD, &waiting ) == SOCKET_ERROR )
 	{
 		agk::Warning( "Failed to get receivable bytes on socket" );
 		return false;
 	}
-	
+
 	if ( waiting == 0 ) return false;
-	
-	sockaddr_in addr;
+
+	sockaddr_storage addr;
 	socklen_t length = sizeof(addr);
 	int result = recvfrom( m_socket, packet->GetRaw(), AGK_NET_PACKET_SIZE, 0, (sockaddr*)&addr, &length );
 	if ( result == SOCKET_ERROR )
@@ -91,13 +153,43 @@ bool UDPManager::RecvPacket( char *fromIP, AGKPacket *packet )
 		agk::Warning( "Failed to receive UDP packet" );
 		return false;
 	}
-	
+
 	if ( result > 0 ) 
 	{
 		packet->SetPos( 0 );
-		strcpy( fromIP, inet_ntoa( addr.sin_addr ) );
+		if ( addr.ss_family == AF_INET6 )
+		{
+			sockaddr_in6 *addrv6 = (sockaddr_in6*) &addr;
+			if ( fromPort ) *fromPort = ntohs(addrv6->sin6_port);
+			if ( fromIP ) inet_ntop( AF_INET6, &(addrv6->sin6_addr), fromIP, 100 ); // don't know size so guess 100
+		}
+		else
+		{
+			sockaddr_in *addrv4 = (sockaddr_in*) &addr;
+			if ( fromPort ) *fromPort = ntohs(addrv4->sin_port);
+			if ( fromIP ) strcpy( fromIP, inet_ntoa( addrv4->sin_addr ) );
+		}
 	}
 
+	return true;
+}
+
+bool UDPManager::PacketReady()
+{
+	if ( m_socket == INVALID_SOCKET )
+	{
+		agk::Error( "Tried to check UDP packet on an uninitialised socket" );
+		return false;
+	}
+	
+	unsigned long waiting = 0;
+	if ( ioctl( m_socket, FIONREAD, &waiting ) == SOCKET_ERROR )
+	{
+		agk::Warning( "Failed to get receivable bytes on socket" );
+		return false;
+	}
+
+	if ( waiting == 0 ) return false;
 	return true;
 }
 
@@ -1353,19 +1445,19 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
 }
 
 /*
-- (id) initWithRequest:(NSURLRequest*)request delegate:(id)delegate
-{
-    m_response = [[ NSMutableData alloc ] init ];
-    m_length = 0;
-    m_received = 0;
-
-    self = [super initWithRequest:request delegate:delegate];
-    
-    //NSLog( @"Connection started to: %s", [[[request URL] path] UTF8String] );
-        
-    return self;
-}
-*/
+ - (id) initWithRequest:(NSURLRequest*)request delegate:(id)delegate
+ {
+ m_response = [[ NSMutableData alloc ] init ];
+ m_length = 0;
+ m_received = 0;
+ 
+ self = [super initWithRequest:request delegate:delegate];
+ 
+ //NSLog( @"Connection started to: %s", [[[request URL] path] UTF8String] );
+ 
+ return self;
+ }
+ */
 
 - (void) dealloc
 {
@@ -1386,18 +1478,17 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
 {
     if ( m_bToFile )
     {
-        if ( m_file ) 
+        if ( m_file )
         {
             m_file->Close();
             delete m_file;
             m_file = 0;
         }
     }
-	m_pHTTP->FinishedInternal(1);
+    m_pHTTP->FinishedInternal(1);
     
     //NSLog( @"Connection finished" );
-    
-    [connection release];
+    // don't release connection here, do it in FinishedInternal instead
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response
@@ -1408,7 +1499,7 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
         m_file = new AGK::cFile();
         m_file->OpenToWrite(m_sFilename.GetStr());
     }
-    else 
+    else
     {
         [ m_response setLength:0 ];
     }
@@ -1417,7 +1508,8 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
     m_length = (int)[responseHTTP expectedContentLength];
     m_received = 0;
     
-    strcpy( m_pHTTP->m_szContentType, [[response MIMEType] UTF8String ] );
+    strcpy( m_pHTTP->m_szContentType, [[response MIMEType] cStringUsingEncoding:NSUTF8StringEncoding] );
+    
     
     m_pHTTP->m_iStatusCode = (int)[responseHTTP statusCode];
 }
@@ -1431,7 +1523,7 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
             m_file = new AGK::cFile();
             m_file->OpenToWrite(m_sFilename.GetStr());
         }
-        m_file->WriteData( (const char*)[data bytes], [data length]);
+        m_file->WriteData( (const char*)[data bytes], (int)[data length]);
     }
     else
     {
@@ -1452,7 +1544,7 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
 {
     if ( m_bToFile )
     {
-        if ( m_file ) 
+        if ( m_file )
         {
             m_file->Close();
             delete m_file;
@@ -1462,7 +1554,7 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
     m_pHTTP->FinishedInternal(0);
     NSLog( @"%@", [error localizedDescription] );
     
-    [connection release];
+    // don't relase connection here, do it in FinishedInternal instead
 }
 
 - (void)connection:(NSURLConnection *)connection didSendBodyData:(NSInteger)bytesWritten totalBytesWritten:(NSInteger)totalBytesWritten totalBytesExpectedToWrite:(NSInteger)totalBytesExpectedToWrite
@@ -1478,44 +1570,45 @@ void Broadcaster::SetData( int ipv6, UINT port, const AGKPacket* packet, UINT in
 
 - (BOOL)connection:(NSURLConnection *)connection canAuthenticateAgainstProtectionSpace:(NSURLProtectionSpace *)protectionSpace
 {
-	if ( m_pHTTP->GetVerifyMode() == 0 )
-	{
-		return [protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust];
-	}
-	else
-	{
-		return NO;
-	}
+    if ( m_pHTTP->GetVerifyMode() == 0 )
+    {
+        return [protectionSpace.authenticationMethod isEqualToString:NSURLAuthenticationMethodServerTrust];
+    }
+    else
+    {
+        return NO;
+    }
 }
 
 - (void)connection:(NSURLConnection *)connection didReceiveAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
 {
-	if ( m_pHTTP->GetVerifyMode() == 0 )
-	{
-		[challenge.sender continueWithoutCredentialForAuthenticationChallenge:challenge];
-	}
-	else
-	{
-		[challenge.sender useCredential:[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust] forAuthenticationChallenge:challenge];
-	}
+    if ( m_pHTTP->GetVerifyMode() == 0 )
+    {
+        [challenge.sender continueWithoutCredentialForAuthenticationChallenge:challenge];
+    }
+    else
+    {
+        [challenge.sender useCredential:[NSURLCredential credentialForTrust:challenge.protectionSpace.serverTrust] forAuthenticationChallenge:challenge];
+    }
 }
 @end
 
 cHTTPConnection::cHTTPConnection()
 {
+    m_connection = nil;
     m_sHost = 0;
-	m_listener = [[AGKHTTPListener alloc] init];
-	m_iSecure = 0;
-	m_bConnected = false;
+    m_listener = [[AGKHTTPListener alloc] init];
+    m_iSecure = 0;
+    m_bConnected = false;
     m_bFinished = true;
-	m_iTimeout = 6000;
-	m_iVerifyMode = 1;
+    m_iTimeout = 6000;
+    m_iVerifyMode = 1;
     
-	m_szResponse = 0;
-	m_fProgress = 0;
+    m_szResponse = 0;
+    m_fProgress = 0;
     m_iStatusCode = 0;
     
-	m_bSaveToFile = false;
+    m_bSaveToFile = false;
     
     m_szContentType[0] = '\0';
 }
@@ -1523,24 +1616,30 @@ cHTTPConnection::cHTTPConnection()
 cHTTPConnection::~cHTTPConnection()
 {
     //NSLog( @"Connection deleted" );
+    if ( m_connection )
+    {
+        [m_connection cancel];
+        [m_connection release];
+        m_connection = nil;
+    }
     if ( m_listener ) [ m_listener release ];
     if ( m_sHost ) [ m_sHost release ];
     if ( m_szResponse ) delete [] m_szResponse;
     
     m_listener = 0;
-
-	cHTTPHeader *pHeader = m_cHeaders.GetFirst();
-	while( pHeader )
-	{
-		delete pHeader;
-		pHeader = m_cHeaders.GetNext();
-	}
-	m_cHeaders.ClearAll();
+    
+    cHTTPHeader *pHeader = m_cHeaders.GetFirst();
+    while( pHeader )
+    {
+        delete pHeader;
+        pHeader = m_cHeaders.GetNext();
+    }
+    m_cHeaders.ClearAll();
 }
 
 UINT cHTTPConnection::Run()
 {
-	return 0;
+    return 0;
 }
 
 void cHTTPConnection::Stop()
@@ -1550,88 +1649,95 @@ void cHTTPConnection::Stop()
 
 void cHTTPConnection::SetTimeout( int milliseconds )
 {
-	if ( milliseconds < 0 ) milliseconds = 0;
-	m_iTimeout = milliseconds;
+    if ( milliseconds < 0 ) milliseconds = 0;
+    m_iTimeout = milliseconds;
 }
 
 void cHTTPConnection::SetVerifyCertificate( int mode )
 {
-	m_iVerifyMode = mode;
+    m_iVerifyMode = mode;
 }
 
 void cHTTPConnection::AddHeader( const char* headerName, const char* headerValue )
 {
-	if ( IsRunning() )
-	{
-		agk::Warning( "Cannot change HTTP headers whilst an async request or download is still in progress, wait for GetRepsonseReady() or DownloadComplete() to return 1" );
-		return;
-	}
-
-	cHTTPHeader *pHeader = m_cHeaders.GetItem( headerName );
-	if ( !pHeader )
-	{
-		pHeader = new cHTTPHeader();
-		pHeader->sName.SetStr( headerName );
-		m_cHeaders.AddItem( pHeader, headerName );
-	}
-
-	pHeader->sValue.SetStr( headerValue );
+    if ( !m_bFinished )
+    {
+        agk::Warning( "Cannot change HTTP headers whilst an async request or download is still in progress, wait for GetRepsonseReady() or DownloadComplete() to return 1" );
+        return;
+    }
+    
+    cHTTPHeader *pHeader = m_cHeaders.GetItem( headerName );
+    if ( !pHeader )
+    {
+        pHeader = new cHTTPHeader();
+        pHeader->sName.SetStr( headerName );
+        m_cHeaders.AddItem( pHeader, headerName );
+    }
+    
+    pHeader->sValue.SetStr( headerValue );
 }
 
 void cHTTPConnection::RemoveHeader( const char* headerName )
 {
-	if ( IsRunning() )
-	{
-		agk::Warning( "Cannot change HTTP headers whilst an async request or download is still in progress, wait for GetRepsonseReady() or DownloadComplete() to return 1" );
-		return;
-	}
-
-	cHTTPHeader *pHeader = m_cHeaders.RemoveItem( headerName );
-	if ( pHeader ) delete pHeader;
+    if ( !m_bFinished )
+    {
+        agk::Warning( "Cannot change HTTP headers whilst an async request or download is still in progress, wait for GetRepsonseReady() or DownloadComplete() to return 1" );
+        return;
+    }
+    
+    cHTTPHeader *pHeader = m_cHeaders.RemoveItem( headerName );
+    if ( pHeader ) delete pHeader;
 }
 
 void cHTTPConnection::FinishedInternal( int value )
 {
-    if ( !m_listener ) return;
-    
-    m_bFinished = true;
-    m_fProgress = 100;
+    if ( m_connection )
+    {
+        [m_connection release];
+        m_connection = nil;
+    }
     
     if ( value == 0 )
     {
         uString err;
-        err.Format( "Failed to connect to %s", [m_sHost UTF8String] );
+        err.Format( "Connection to %s closed unexpectedly", m_sLastURL.GetStr() );
         agk::Warning( err );
     }
     
-    int reslength = [m_listener->m_response length];
-    
-    if ( value > 0 )
+    if ( m_listener )
     {
-        m_szResponse = new char[ reslength + 1 ];
-		if ( reslength > 0 ) memcpy( m_szResponse, [m_listener->m_response bytes], reslength );
-        m_szResponse[ reslength ] = 0;
+        int reslength = (int) [m_listener->m_response length];
+        
+        if ( value > 0 )
+        {
+            m_szResponse = new char[ reslength + 1 ];
+            if ( reslength > 0 ) memcpy( m_szResponse, [m_listener->m_response bytes], reslength );
+            m_szResponse[ reslength ] = 0;
+        }
     }
     
     if ( m_sRndFilename.GetLength() > 0 ) agk::DeleteFile( m_sRndFilename );
     m_sRndFilename.SetStr( "" );
+    
+    m_bFinished = true;
+    m_fProgress = 100;
 }
 
 bool cHTTPConnection::SetHost( const char *szHost, int iSecure, const char *szUser, const char *szPass )
 {
     uString sURL( szHost );
-
+    
     m_sUsername.SetStr(szUser);
     m_sPassword.SetStr(szPass);
-
+    
     if ( iSecure == 0 ) sURL.Prepend( "http://" );
     else sURL.Prepend( "https://" );
     
     m_iSecure = iSecure;
     
     m_sHost = [ [ NSString alloc ] initWithUTF8String:sURL.GetStr() ];
-                  
-	return true;
+    
+    return true;
 }
 
 void cHTTPConnection::Close()
@@ -1641,20 +1747,21 @@ void cHTTPConnection::Close()
 
 char* cHTTPConnection::SendRequest( const char *szServerFile, const char *szPostData )
 {
-    if ( !m_bFinished ) 
+    if ( !m_bFinished )
     {
         agk::Warning( "Failed to send HTTP request, a request is already in progress for this ID" );
         return 0;
     }
     
     if ( m_szResponse ) delete [] m_szResponse;
-	m_szResponse = 0;
-	m_fProgress = 0;
+    m_szResponse = 0;
+    m_fProgress = 0;
     m_iStatusCode = 0;
     m_bFinished = true;
     
     NSString *sURL = [ m_sHost stringByAppendingString:@"/" ];
-    sURL = [ sURL stringByAppendingString:[NSString stringWithUTF8String:szServerFile] ];
+    sURL = [ sURL stringByAppendingString:[NSString stringWithCString:szServerFile encoding:NSUTF8StringEncoding] ];
+    m_sLastURL.SetStr( [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:sURL] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:m_iTimeout/1000.0 ];
     
@@ -1664,8 +1771,8 @@ char* cHTTPConnection::SendRequest( const char *szServerFile, const char *szPost
         [request setHTTPMethod:@"POST"];
         [request setHTTPBody:[NSData dataWithBytes:szPostData length:strlen(szPostData)] ];
     }
-
-	uString sHeader;
+    
+    uString sHeader;
     if ( m_sUsername.GetLength() > 0 || m_sPassword.GetLength() > 0 )
     {
         sHeader.Format( "%s:%s", m_sUsername.GetStr(), m_sPassword.GetStr() );
@@ -1674,30 +1781,29 @@ char* cHTTPConnection::SendRequest( const char *szServerFile, const char *szPost
         delete [] base64;
         [request addValue:[NSString stringWithUTF8String:sHeader.GetStr()] forHTTPHeaderField:@"Authorization"];
     }
-
-	cHTTPHeader *pHeader = m_cHeaders.GetFirst();
-	while( pHeader )
-	{
-		[request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
-		pHeader = m_cHeaders.GetNext();
-	}
     
-    //NSLog( @"S Connection started to: %s", [[[request URL] path] UTF8String] );
+    cHTTPHeader *pHeader = m_cHeaders.GetFirst();
+    while( pHeader )
+    {
+        [request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
+        pHeader = m_cHeaders.GetNext();
+    }
+    
     
     NSURLResponse *response = 0;
     NSData *responseData = [ NSURLConnection sendSynchronousRequest:request returningResponse:&response error:NULL ];
     if ( !responseData )
     {
         uString err;
-        err.Format( "Failed to connect to %s", [m_sHost UTF8String] );
+        err.Format( "Failed to connect to %s", [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
         agk::Warning( err );
-        return 0;        
+        return 0;
     }
     
     NSHTTPURLResponse *responseHTTP = (NSHTTPURLResponse*) response;
     m_iStatusCode = (int)[responseHTTP statusCode];
     
-    int resLength = [responseData length];
+    int resLength = (int) [responseData length];
     char * str = new char[ resLength + 1 ];
     memcpy( str, [ responseData bytes ], resLength );
     str[ resLength ] = 0;
@@ -1706,21 +1812,22 @@ char* cHTTPConnection::SendRequest( const char *szServerFile, const char *szPost
 
 bool cHTTPConnection::SendRequestASync( const char *szServerFile, const char *szPostData )
 {
-	if ( !m_bFinished ) 
+    if ( !m_bFinished )
     {
         agk::Warning( "Failed to send HTTP request, a request is already in progress for this ID" );
         return false;
     }
     
     if ( m_szResponse ) delete [] m_szResponse;
-	m_szResponse = 0;
-	m_fProgress = 0;
+    m_szResponse = 0;
+    m_fProgress = 0;
     m_iStatusCode = 0;
     m_bFinished = false;
     m_sRndFilename.SetStr("");
     
     NSString *sURL = [ m_sHost stringByAppendingString:@"/" ];
-    sURL = [ sURL stringByAppendingString:[NSString stringWithUTF8String:szServerFile] ];
+    sURL = [ sURL stringByAppendingString:[NSString stringWithCString:szServerFile encoding:NSUTF8StringEncoding] ];
+    m_sLastURL.SetStr( [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:sURL] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:m_iTimeout/1000.0 ];
     
@@ -1730,8 +1837,8 @@ bool cHTTPConnection::SendRequestASync( const char *szServerFile, const char *sz
         [request setHTTPMethod:@"POST"];
         [request setHTTPBody:[NSData dataWithBytes:szPostData length:strlen(szPostData)] ];
     }
-
-	uString sHeader;
+    
+    uString sHeader;
     if ( m_sUsername.GetLength() > 0 || m_sPassword.GetLength() > 0 )
     {
         sHeader.Format( "%s:%s", m_sUsername.GetStr(), m_sPassword.GetStr() );
@@ -1740,13 +1847,13 @@ bool cHTTPConnection::SendRequestASync( const char *szServerFile, const char *sz
         delete [] base64;
         [request addValue:[NSString stringWithUTF8String:sHeader.GetStr()] forHTTPHeaderField:@"Authorization"];
     }
-
-	cHTTPHeader *pHeader = m_cHeaders.GetFirst();
-	while( pHeader )
-	{
-		[request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
-		pHeader = m_cHeaders.GetNext();
-	}
+    
+    cHTTPHeader *pHeader = m_cHeaders.GetFirst();
+    while( pHeader )
+    {
+        [request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
+        pHeader = m_cHeaders.GetNext();
+    }
     
     // fix Content-Length not being visible to didReceiveData callback
     [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
@@ -1755,15 +1862,15 @@ bool cHTTPConnection::SendRequestASync( const char *szServerFile, const char *sz
     m_listener->m_pHTTP = this;
     m_listener->m_bToFile = false;
     m_listener->m_file = 0;
-    NSURLConnection *result = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
+    m_connection = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
     
-    if ( !result )
+    if ( !m_connection )
     {
         uString err;
-        err.Format( "Failed to connect to %s", [m_sHost UTF8String] );
+        err.Format( "Failed to connect to %s", [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
         agk::Warning( err );
         m_bFinished = true;
-        return false;        
+        return false;
     }
     
     return true;
@@ -1771,7 +1878,7 @@ bool cHTTPConnection::SendRequestASync( const char *szServerFile, const char *sz
 
 bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData, const char *szLocalFile )
 {
-    if ( !m_bFinished ) 
+    if ( !m_bFinished )
     {
         agk::Warning( "Failed to send HTTP file, a request is already in progress for this ID" );
         return false;
@@ -1794,13 +1901,14 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     // solution: copy the entire HTTP body to a temp file and stream that file using NSInputStream
     
     if ( m_szResponse ) delete [] m_szResponse;
-	m_szResponse = 0;
-	m_fProgress = 0;
+    m_szResponse = 0;
+    m_fProgress = 0;
     m_iStatusCode = 0;
     m_bFinished = false;
     
     NSString *sURL = [ m_sHost stringByAppendingString:@"/" ];
-    sURL = [ sURL stringByAppendingString:[NSString stringWithUTF8String:szServerFile] ];
+    sURL = [ sURL stringByAppendingString:[NSString stringWithCString:szServerFile encoding:NSUTF8StringEncoding] ];
+    m_sLastURL.SetStr( [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:sURL] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:m_iTimeout/1000.0 ];
     
@@ -1817,41 +1925,41 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     
     // parse the post variables into a file upload friendly format.
     char sName[ 256 ];
-	char sValue[ 512 ];
-	const char* remaining = postData.GetStr();
-	int count = postData.Count( '&' ) + 1;
-	for ( int i = 0; i < count; i++ )
-	{
-		int pos = strcspn( remaining, "=" );
-		strncpy( sName, remaining, pos ); 
-		sName[ pos ] = '\0';
-		remaining += pos+1;
-		pos = strcspn( remaining, "&" );
-		strncpy( sValue, remaining, pos ); 
-		sValue[ pos ] = '\0';
-		remaining += pos+1;
+    char sValue[ 512 ];
+    const char* remaining = postData.GetStr();
+    int count = postData.Count( '&' ) + 1;
+    for ( int i = 0; i < count; i++ )
+    {
+        size_t pos = strcspn( remaining, "=" );
+        strncpy( sName, remaining, pos );
+        sName[ pos ] = '\0';
+        remaining += pos+1;
+        pos = strcspn( remaining, "&" );
+        strncpy( sValue, remaining, pos );
+        sValue[ pos ] = '\0';
+        remaining += pos+1;
         
-		if ( strlen( sName ) == 0 || strlen( sValue ) == 0 ) continue;
+        if ( strlen( sName ) == 0 || strlen( sValue ) == 0 ) continue;
         
-		sFinalPostData.Append( "--------------------AaB03x\r\nContent-Disposition: form-data; name=\"" );
-		sFinalPostData.Append( sName );
-		sFinalPostData.Append( "\"\r\n\r\n" );
-		sFinalPostData.Append( sValue );
-		sFinalPostData.Append( "\r\n" );
-	}
+        sFinalPostData.Append( "--------------------AaB03x\r\nContent-Disposition: form-data; name=\"" );
+        sFinalPostData.Append( sName );
+        sFinalPostData.Append( "\"\r\n\r\n" );
+        sFinalPostData.Append( sValue );
+        sFinalPostData.Append( "\r\n" );
+    }
     
     // extract filename from the path
     uString uploadFile( szLocalFile );
     uploadFile.Replace( '\\', '/' );
-	uString sFilename;
-	int pos = uploadFile.RevFind( '/' );
-	if ( pos >= 0 ) uploadFile.SubString( sFilename, pos+1 );
-	else sFilename.SetStr( uploadFile );
+    uString sFilename;
+    int pos = uploadFile.RevFind( '/' );
+    if ( pos >= 0 ) uploadFile.SubString( sFilename, pos+1 );
+    else sFilename.SetStr( uploadFile );
     
     // add file variable to post data
     sFinalPostData.Append( "--------------------AaB03x\r\nContent-Disposition: form-data; name=\"myfile\"; filename=\"" );
-	sFinalPostData.Append( sFilename );
-	sFinalPostData.Append( "\"\r\nContent-Type: application/x-zip-compressed\r\n\r\n" );
+    sFinalPostData.Append( sFilename );
+    sFinalPostData.Append( "\"\r\nContent-Type: application/x-zip-compressed\r\n\r\n" );
     
     // write the initial data to the temp file
     tempFile.WriteData( sFinalPostData.GetStr(), sFinalPostData.GetLength() );
@@ -1861,7 +1969,7 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     localFile.OpenToRead( szLocalFile );
     char buf[5000];
     int written = 0;
-    do 
+    do
     {
         written = localFile.ReadData(buf, 5000);
         if ( written > 0 ) tempFile.WriteData(buf, written);
@@ -1875,7 +1983,7 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     
     uString sFullPath( m_sRndFilename );
     agk::PlatformGetFullPathWrite(sFullPath);
-    NSString *pPath = [ NSString stringWithUTF8String:sFullPath.GetStr() ];
+    NSString *pPath = [ NSString stringWithCString:sFullPath.GetStr() encoding:NSUTF8StringEncoding ];
     
     NSInputStream *stream = [ NSInputStream inputStreamWithFileAtPath:pPath ];
     
@@ -1886,8 +1994,8 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     NSString *sLength = [NSString stringWithFormat:@"%d",length ];
     [request addValue:sLength forHTTPHeaderField:@"Content-Length"];
     [request addValue:@"multipart/form-data; boundary=------------------AaB03x" forHTTPHeaderField:@"Content-Type"];
-
-	uString sHeader;
+    
+    uString sHeader;
     if ( m_sUsername.GetLength() > 0 || m_sPassword.GetLength() > 0 )
     {
         sHeader.Format( "%s:%s", m_sUsername.GetStr(), m_sPassword.GetStr() );
@@ -1896,13 +2004,13 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
         delete [] base64;
         [request addValue:[NSString stringWithUTF8String:sHeader.GetStr()] forHTTPHeaderField:@"Authorization"];
     }
-
-	cHTTPHeader *pHeader = m_cHeaders.GetFirst();
-	while( pHeader )
-	{
-		[request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
-		pHeader = m_cHeaders.GetNext();
-	}
+    
+    cHTTPHeader *pHeader = m_cHeaders.GetFirst();
+    while( pHeader )
+    {
+        [request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
+        pHeader = m_cHeaders.GetNext();
+    }
     
     // fix Content-Length not being visible to didReceiveData callback
     [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
@@ -1911,15 +2019,15 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
     m_listener->m_pHTTP = this;
     m_listener->m_bToFile = false;
     m_listener->m_file = 0;
-    NSURLConnection *result = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
+    m_connection = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
     
-    if ( !result )
+    if ( !m_connection )
     {
         uString err;
-        err.Format( "Failed to connect to %s", [m_sHost UTF8String] );
+        err.Format( "Failed to connect to %s", [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
         agk::Warning( err );
         m_bFinished = true;
-        return false;        
+        return false;
     }
     
     return true;
@@ -1927,39 +2035,39 @@ bool cHTTPConnection::SendFile( const char *szServerFile, const char *szPostData
 
 int cHTTPConnection::GetResponseReady()
 {
-	if ( !m_bFinished ) return 0;
-	else if ( m_szResponse ) return 1;
-	else return -1;
+    if ( !m_bFinished ) return 0;
+    else if ( m_szResponse ) return 1;
+    else return -1;
 }
 
 const char* cHTTPConnection::GetResponse()
 {
-	return m_szResponse;
+    return m_szResponse;
 }
-           
+
 const char* cHTTPConnection::GetContentType()
 {
     return m_szContentType;
 }
 
-
 bool cHTTPConnection::DownloadFile( const char *szServerFile, const char *szLocalFile, const char *szPostData )
 {
-	if ( !m_bFinished ) 
+    if ( !m_bFinished )
     {
         agk::Warning( "Failed to send HTTP request, a request is already in progress for this ID" );
         return false;
     }
     
     if ( m_szResponse ) delete [] m_szResponse;
-	m_szResponse = 0;
-	m_fProgress = 0;
+    m_szResponse = 0;
+    m_fProgress = 0;
     m_iStatusCode = 0;
     m_bFinished = false;
     m_sRndFilename.SetStr("");
     
     NSString *sURL = [ m_sHost stringByAppendingString:@"/" ];
-    sURL = [ sURL stringByAppendingString:[NSString stringWithUTF8String:szServerFile] ];
+    sURL = [ sURL stringByAppendingString:[NSString stringWithCString:szServerFile encoding:NSUTF8StringEncoding] ];
+    m_sLastURL.SetStr( [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
     
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:sURL] cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:m_iTimeout/1000.0 ];
     
@@ -1969,8 +2077,8 @@ bool cHTTPConnection::DownloadFile( const char *szServerFile, const char *szLoca
         [request setHTTPMethod:@"POST"];
         [request setHTTPBody:[NSData dataWithBytes:szPostData length:strlen(szPostData)] ];
     }
-
-	uString sHeader;
+    
+    uString sHeader;
     if ( m_sUsername.GetLength() > 0 || m_sPassword.GetLength() > 0 )
     {
         sHeader.Format( "%s:%s", m_sUsername.GetStr(), m_sPassword.GetStr() );
@@ -1979,13 +2087,13 @@ bool cHTTPConnection::DownloadFile( const char *szServerFile, const char *szLoca
         delete [] base64;
         [request addValue:[NSString stringWithUTF8String:sHeader.GetStr()] forHTTPHeaderField:@"Authorization"];
     }
-
-	cHTTPHeader *pHeader = m_cHeaders.GetFirst();
-	while( pHeader )
-	{
-		[request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
-		pHeader = m_cHeaders.GetNext();
-	}
+    
+    cHTTPHeader *pHeader = m_cHeaders.GetFirst();
+    while( pHeader )
+    {
+        [request setValue:[NSString stringWithUTF8String:pHeader->sValue.GetStr()] forHTTPHeaderField:[NSString stringWithUTF8String:pHeader->sName.GetStr()]];
+        pHeader = m_cHeaders.GetNext();
+    }
     
     // fix Content-Length not being visible to didReceiveData callback
     [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
@@ -1995,15 +2103,15 @@ bool cHTTPConnection::DownloadFile( const char *szServerFile, const char *szLoca
     m_listener->m_bToFile = true;
     m_listener->m_sFilename.SetStr(szLocalFile);
     m_listener->m_file = 0;
-    NSURLConnection *result = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
+    m_connection = [ [NSURLConnection alloc] initWithRequest:request delegate:m_listener ];
     
-    if ( !result )
+    if ( !m_connection )
     {
         uString err;
-        err.Format( "Failed to connect to %s", [m_sHost UTF8String] );
+        err.Format( "Failed to connect to %s", [sURL cStringUsingEncoding:NSUTF8StringEncoding] );
         agk::Warning( err );
         m_bFinished = true;
-        return false;        
+        return false;
     }
     
     return true;
@@ -2011,6 +2119,5 @@ bool cHTTPConnection::DownloadFile( const char *szServerFile, const char *szLoca
 
 bool cHTTPConnection::DownloadComplete()
 {
-	return m_bFinished ? 1 : 0;
+    return m_bFinished ? 1 : 0;
 }
-

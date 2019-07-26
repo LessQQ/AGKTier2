@@ -9821,3 +9821,244 @@ case AGKI_GETHTTPSTATUSCODE_L_L:
     m_pStack[ m_iStackPtr++ ].i = agk::GetHTTPStatusCode( param0 );
     break;
 }
+case AGKI_GETSPEECHVOICEID_S_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    char *szReturnStr = agk::GetSpeechVoiceID( param0 );
+    m_pStrStack[ m_iStrStackPtr++ ].SetStrUTF8( szReturnStr );
+    delete [] szReturnStr;
+    break;
+}
+case AGKI_SETSPEECHLANGUAGEBYID_0_S:
+{
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::SetSpeechLanguageByID( param0 );
+    break;
+}
+case AGKI_GETSPRITEFLIPPEDH_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetSpriteFlippedH( param0 );
+    break;
+}
+case AGKI_GETSPRITEINSCREEN_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetSpriteInScreen( param0 );
+    break;
+}
+case AGKI_GETSPRITEFLIPPEDV_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetSpriteFlippedV( param0 );
+    break;
+}
+case AGKI_DRAWPARTICLES_0_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    agk::DrawParticles( param0 );
+    break;
+}
+case AGKI_DRAW3DPARTICLES_0_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    agk::Draw3DParticles( param0 );
+    break;
+}
+case AGKI_SETCLIPBOARDTEXT_0_S:
+{
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::SetClipboardText( param0 );
+    break;
+}
+case AGKI_GETCLIPBOARDTEXT_S_0:
+{
+    char *szReturnStr = agk::GetClipboardText( );
+    m_pStrStack[ m_iStrStackPtr++ ].SetStrUTF8( szReturnStr );
+    delete [] szReturnStr;
+    break;
+}
+case AGKI_SETEDITBOXINPUTTYPE_0_L_L:
+{
+    int param1 = m_pStack[ --m_iStackPtr ].i;
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    agk::SetEditBoxInputType( param0, param1 );
+    break;
+}
+case AGKI_GETEXPANSIONFILEERROR_L_0:
+{
+    m_pStack[ m_iStackPtr++ ].i = agk::GetExpansionFileError( );
+    break;
+}
+case AGKI_GETSKELETON2DDEPTH_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetSkeleton2DDepth( param0 );
+    break;
+}
+case AGKI_GETEDITBOXDEPTH_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetEditBoxDepth( param0 );
+    break;
+}
+case AGKI_GETCHARBUFFER_S_0:
+{
+    char *szReturnStr = agk::GetCharBuffer( );
+    m_pStrStack[ m_iStrStackPtr++ ].SetStrUTF8( szReturnStr );
+    delete [] szReturnStr;
+    break;
+}
+case AGKI_GETCHARBUFFERLENGTH_L_0:
+{
+    m_pStack[ m_iStackPtr++ ].i = agk::GetCharBufferLength( );
+    break;
+}
+case AGKI_GETRAWJOYSTICKSLIDER_L_L_L:
+{
+    int param1 = m_pStack[ --m_iStackPtr ].i;
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetRawJoystickSlider( param0, param1 );
+    break;
+}
+case AGKI_GETRAWJOYSTICKPOV_L_L_L:
+{
+    int param1 = m_pStack[ --m_iStackPtr ].i;
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetRawJoystickPOV( param0, param1 );
+    break;
+}
+case AGKI_COPYNETWORKMESSAGE_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::CopyNetworkMessage( param0 );
+    break;
+}
+case AGKI_GETURLSCHEMETEXT_S_0:
+{
+    char *szReturnStr = agk::GetURLSchemeText( );
+    m_pStrStack[ m_iStrStackPtr++ ].SetStrUTF8( szReturnStr );
+    delete [] szReturnStr;
+    break;
+}
+case AGKI_CLEARURLSCHEMETEXT_0_0:
+{
+    agk::ClearURLSchemeText( );
+    break;
+}
+case AGKI_EXTRACTZIP_0_S_S_S:
+{
+    const char* param2 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    const char* param1 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::ExtractZip( param0, param1, param2 );
+    break;
+}
+case AGKI_GETRAWJOYSTICKNAME_S_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    char *szReturnStr = agk::GetRawJoystickName( param0 );
+    m_pStrStack[ m_iStrStackPtr++ ].SetStrUTF8( szReturnStr );
+    delete [] szReturnStr;
+    break;
+}
+case AGKI_PLAYYOUTUBEVIDEO_0_S_S_F:
+{
+    float param2 = m_pStack[ --m_iStackPtr ].f;
+    const char* param1 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::PlayYoutubeVideo( param0, param1, param2 );
+    break;
+}
+case AGKI_SHAREFILE_0_S:
+{
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::ShareFile( param0 );
+    break;
+}
+case AGKI_GETNETWORKMESSAGEFROMPORT_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetNetworkMessageFromPort( param0 );
+    break;
+}
+case AGKI_CREATEUDPLISTENER_L_S_L:
+{
+    int param1 = m_pStack[ --m_iStackPtr ].i;
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    m_pStack[ m_iStackPtr++ ].i = agk::CreateUDPListener( param0, param1 );
+    break;
+}
+case AGKI_CREATEUDPLISTENER_L_L_S_L:
+{
+    int param2 = m_pStack[ --m_iStackPtr ].i;
+    const char* param1 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::CreateUDPListener( param0, param1, param2 );
+    break;
+}
+case AGKI_SENDUDPNETWORKMESSAGE_0_L_L_S_L:
+{
+    int param3 = m_pStack[ --m_iStackPtr ].i;
+    const char* param2 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    int param1 = m_pStack[ --m_iStackPtr ].i;
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    agk::SendUDPNetworkMessage( param0, param1, param2, param3 );
+    break;
+}
+case AGKI_GETUDPNETWORKMESSAGE_L_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    m_pStack[ m_iStackPtr++ ].i = agk::GetUDPNetworkMessage( param0 );
+    break;
+}
+case AGKI_DELETEUDPLISTENER_0_L:
+{
+    int param0 = m_pStack[ --m_iStackPtr ].i;
+    agk::DeleteUDPListener( param0 );
+    break;
+}
+case AGKI_EXTRACTZIPASYNC_0_S_S_S:
+{
+    const char* param2 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    const char* param1 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    agk::ExtractZipASync( param0, param1, param2 );
+    break;
+}
+case AGKI_GETZIPEXTRACTPROGRESS_F_0:
+{
+    m_pStack[ m_iStackPtr++ ].f = agk::GetZipExtractProgress( );
+    break;
+}
+case AGKI_GETZIPEXTRACTCOMPLETE_L_0:
+{
+    m_pStack[ m_iStackPtr++ ].i = agk::GetZipExtractComplete( );
+    break;
+}
+case AGKI_GETWINDOWWIDTH_L_0:
+{
+    m_pStack[ m_iStackPtr++ ].i = agk::GetWindowWidth( );
+    break;
+}
+case AGKI_GETWINDOWHEIGHT_L_0:
+{
+    m_pStack[ m_iStackPtr++ ].i = agk::GetWindowHeight( );
+    break;
+}
+case AGKI_CANCELZIPEXTRACT_0_0:
+{
+    agk::CancelZipExtract( );
+    break;
+}
+case AGKI_GAMECENTERLOGOUT_0_0:
+{
+    agk::GameCenterLogout( );
+    break;
+}
+case AGKI_GETIMAGESIZEFROMFILE_L_S:
+{
+    const char* param0 = m_pStrStack[ --m_iStrStackPtr ].GetStr();
+    m_pStack[ m_iStackPtr++ ].i = agk::GetImageSizeFromFile( param0 );
+    break;
+}

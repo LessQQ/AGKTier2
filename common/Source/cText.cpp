@@ -90,6 +90,8 @@ cText::cText( int iLength )
 	m_pCharStyles = 0;
 	m_fX = 0;
 	m_fY = 0;
+	m_fSpriteX = 0;
+	m_fSpriteY = 0;
 	m_fAngle = 0;
 	m_iDepth = 9; // 0 is on top
 	m_fOrigSize = 4;
@@ -178,6 +180,8 @@ cText::cText( int iLength )
 			m_fFontScale = pixelSize / (float) m_pFTSizedFont->GetSize();
 			m_pFTSizedFont->AddRef();
 		}
+
+		m_bFlags |= AGK_TEXT_SNAP_TO_PIXELS;
 	}
 
 	if ( iLength > 0 )
@@ -214,7 +218,7 @@ cText::cText( int iLength )
 			m_pSprites[ i ]->SetColor( m_iRed, m_iGreen, m_iBlue, m_iAlpha );
 			if ( m_pFTSizedFont ) 
 			{
-				m_pSprites[ i ]->SetSnap( 1 );
+				if ( m_bFlags & AGK_TEXT_SNAP_TO_PIXELS ) m_pSprites[ i ]->SetSnap( 1 );
 				AGKFontImage *pFontImage = m_pFTSizedFont->GetCharImage( 32, 0 );
 				m_pSprites[ i ]->SetFontImage( pFontImage, m_fFontScale );
 			}
@@ -289,6 +293,7 @@ cText::~cText()
 	if ( pIndices ) delete [] pIndices;
 
 	if ( m_pFTSizedFont ) m_pFTSizedFont->Release();
+	m_pFTSizedFont = 0;
 }
 
 void cText::SetSpriteManager( cSpriteMgrEx *pMgr )
@@ -457,7 +462,7 @@ void cText::SetString( const char* szString )
 
 			if ( m_pFTSizedFont ) 
 			{
-				pNewSpriteList[ i ]->SetSnap( 1 );
+				if ( m_bFlags & AGK_TEXT_SNAP_TO_PIXELS ) pNewSpriteList[ i ]->SetSnap( 1 );
 				AGKFontImage *pFontImage = m_pFTSizedFont->GetCharImage( 32, 0 );
 				pNewSpriteList[ i ]->SetFontImage( pFontImage, m_fFontScale );
 			}
@@ -762,8 +767,8 @@ void cText::Refresh()
 
 void cText::SetPosition( float fX, float fY )
 {
-	float oldX = m_fX;
-	float oldY = m_fY;
+	float oldX = m_fSpriteX;
+	float oldY = m_fSpriteY;
 	m_fX = fX;
 	m_fY = fY;
 	ShiftPosition( fX - oldX, fY - oldY );
@@ -773,6 +778,20 @@ void cText::ReAlignSprites()
 {
 	UINT letters = m_sText.GetNumChars();
 
+	if ( m_bFlags & AGK_TEXT_SNAP_TO_PIXELS )
+	{
+		int iSpriteX = agk::Round(m_fX / agk::DeviceToDisplayRatioX());
+		m_fSpriteX = iSpriteX * agk::DeviceToDisplayRatioX();
+
+		int iSpriteY = agk::Round(m_fY / agk::DeviceToDisplayRatioY());
+		m_fSpriteY = iSpriteY * agk::DeviceToDisplayRatioY();
+	}
+	else
+	{
+		m_fSpriteX = m_fX;
+		m_fSpriteY = m_fY;
+	}
+	
 	m_iLines = 1;
 	m_fTotalWidth = 0;
 	m_fTotalHeight = 0;
@@ -806,7 +825,7 @@ void cText::ReAlignSprites()
 			UINT first = 0;
 			UINT curr = 0;
 			int lastSpace = -1;
-			float y = m_fY;
+			float y = m_fSpriteY;
 			if ( letters > 0 ) 
 			{
 				letterWidth = m_pSprites[ 0 ]->GetFontImage() ? m_pSprites[ 0 ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ 0 ]->GetWidth();
@@ -843,17 +862,17 @@ void cText::ReAlignSprites()
 
 						if ( m_fAngle == 0 )
 						{
-							m_pSprites[ i ]->SetPosition( m_fX + currWidth + offsetX, y + offsetY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + currWidth + offsetX, y + offsetY );
 						}
 						else
 						{
 							float fTempX = currWidth + m_pSprites[ i ]->GetOffsetX() + offsetX;
-							float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+							float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 							
 							float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 							float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-							m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 						}
 
 						letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
@@ -890,17 +909,17 @@ void cText::ReAlignSprites()
 
 					if ( m_fAngle == 0 )
 					{
-						m_pSprites[ i ]->SetPosition( m_fX + currWidth + offsetX, y + offsetY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + currWidth + offsetX, y + offsetY );
 					}
 					else
 					{
 						float fTempX = currWidth + m_pSprites[ i ]->GetOffsetX() + offsetX;
-						float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+						float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 						
 						float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 						float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-						m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 					}
 
 					letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
@@ -909,11 +928,11 @@ void cText::ReAlignSprites()
 
 				currWidth -= m_fSpacing;
 				if ( currWidth > m_fTotalWidth ) m_fTotalWidth = currWidth;
-				m_fTotalHeight = (y - m_fY) + m_fSize;
+				m_fTotalHeight = (y - m_fSpriteY) + m_fSize;
 			}
 			else 
 			{
-				m_fTotalHeight = (y - m_fY) - m_fVSpacing;
+				m_fTotalHeight = (y - m_fSpriteY) - m_fVSpacing;
 			}
 			break;
 		}
@@ -923,7 +942,7 @@ void cText::ReAlignSprites()
 			UINT first = 0;
 			UINT curr = 0;
 			int lastSpace = -1;
-			float y = m_fY;
+			float y = m_fSpriteY;
 			if ( letters > 0 ) 
 			{
 				letterWidth = m_pSprites[ 0 ]->GetFontImage() ? m_pSprites[ 0 ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ 0 ]->GetWidth();
@@ -977,17 +996,17 @@ void cText::ReAlignSprites()
 
 						if ( m_fAngle == 0 )
 						{
-							m_pSprites[ i ]->SetPosition( m_fX + pos + offsetX, y + offsetY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + pos + offsetX, y + offsetY );
 						}
 						else
 						{
 							float fTempX = pos + m_pSprites[ i ]->GetOffsetX() + offsetX;
-							float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+							float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 							
 							float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 							float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-							m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 						}
 
 						letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
@@ -1030,28 +1049,28 @@ void cText::ReAlignSprites()
 
 					if ( m_fAngle == 0 )
 					{
-						m_pSprites[ i ]->SetPosition( m_fX + pos + offsetX, y + offsetY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + pos + offsetX, y + offsetY );
 					}
 					else
 					{
 						float fTempX = pos + m_pSprites[ i ]->GetOffsetX() + offsetX;
-						float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+						float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 						
 						float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 						float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-						m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 					}
 
 					letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
 					pos += letterWidth + m_fSpacing;
 				}
 
-				m_fTotalHeight = (y - m_fY) + m_fSize;
+				m_fTotalHeight = (y - m_fSpriteY) + m_fSize;
 			}
 			else
 			{
-				m_fTotalHeight = (y - m_fY) - m_fVSpacing;
+				m_fTotalHeight = (y - m_fSpriteY) - m_fVSpacing;
 			}
 			
 			break;
@@ -1062,7 +1081,7 @@ void cText::ReAlignSprites()
 			UINT first = 0;
 			UINT curr = 0;
 			int lastSpace = -1;
-			float y = m_fY;
+			float y = m_fSpriteY;
 			if ( letters > 0 ) 
 			{
 				letterWidth = m_pSprites[ 0 ]->GetFontImage() ? m_pSprites[ 0 ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ 0 ]->GetWidth();
@@ -1116,17 +1135,17 @@ void cText::ReAlignSprites()
 
 						if ( m_fAngle == 0 )
 						{
-							m_pSprites[ i ]->SetPosition( m_fX + pos + offsetX, y + offsetY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + pos + offsetX, y + offsetY );
 						}
 						else
 						{
 							float fTempX = pos + m_pSprites[ i ]->GetOffsetX() + offsetX;
-							float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+							float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 							
 							float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 							float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-							m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+							m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 						}
 
 						letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
@@ -1169,28 +1188,28 @@ void cText::ReAlignSprites()
 
 					if ( m_fAngle == 0 )
 					{
-						m_pSprites[ i ]->SetPosition( m_fX + pos + offsetX, y + offsetY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + pos + offsetX, y + offsetY );
 					}
 					else
 					{
 						float fTempX = pos + m_pSprites[ i ]->GetOffsetX() + offsetX;
-						float fTempY = y - m_fY + m_pSprites[ i ]->GetOffsetY() + offsetY;
+						float fTempY = y - m_fSpriteY + m_pSprites[ i ]->GetOffsetY() + offsetY;
 						
 						float fNewX = fTempX*fCosA - fTempY*fSinA1 - m_pSprites[ i ]->GetOffsetX();
 						float fNewY = fTempY*fCosA + fTempX*fSinA2 - m_pSprites[ i ]->GetOffsetY();
 
-						m_pSprites[ i ]->SetPosition( m_fX + fNewX, m_fY + fNewY );
+						m_pSprites[ i ]->SetPosition( m_fSpriteX + fNewX, m_fSpriteY + fNewY );
 					}
 
 					letterWidth = m_pSprites[ i ]->GetFontImage() ? m_pSprites[ i ]->GetFontImage()->GetDisplayAdvanceX()*m_fFontScale : m_pSprites[ i ]->GetWidth();
 					pos += letterWidth + m_fSpacing;
 				}
 
-				m_fTotalHeight = (y - m_fY) + m_fSize;
+				m_fTotalHeight = (y - m_fSpriteY) + m_fSize;
 			}
 			else
 			{
-				m_fTotalHeight = (y - m_fY) - m_fVSpacing;
+				m_fTotalHeight = (y - m_fSpriteY) - m_fVSpacing;
 			}
 			break;
 		}
@@ -1204,7 +1223,7 @@ void cText::ReAlignSprites()
 
 void cText::SetX( float fX )
 {
-	float oldX = m_fX;
+	float oldX = m_fSpriteX;
 	m_fX = fX;
 	// don't do a full rebuild of position data
 	//SetPosition( m_fX, m_fY );
@@ -1213,7 +1232,7 @@ void cText::SetX( float fX )
 
 void cText::SetY( float fY )
 {
-	float oldY = m_fY;
+	float oldY = m_fSpriteY;
 	m_fY = fY;
 	//SetPosition( m_fX, m_fY );
 	ShiftPosition( 0, fY - oldY );
@@ -1240,6 +1259,19 @@ void cText::ChangedAspect()
 
 void cText::ShiftPosition( float fDiffX, float fDiffY )
 {
+	if ( m_bFlags & AGK_TEXT_SNAP_TO_PIXELS )
+	{
+		int iDiffX = agk::Round(fDiffX / agk::DeviceToDisplayRatioX());
+		int iDiffY = agk::Round(fDiffY / agk::DeviceToDisplayRatioY());
+		if ( iDiffX == 0 && iDiffY == 0 ) return;
+
+		fDiffX = iDiffX * agk::DeviceToDisplayRatioX();
+		fDiffY = iDiffY * agk::DeviceToDisplayRatioY();
+	}
+
+	m_fSpriteX += fDiffX;
+	m_fSpriteY += fDiffY;
+
 	for ( UINT i = 0; i < m_iNumSprites; i++ )
 	{
 		m_pSprites[ i ]->SetPosition( m_pSprites[ i ]->GetX() + fDiffX, m_pSprites[ i ]->GetY() + fDiffY );
@@ -1251,14 +1283,18 @@ void cText::SetSize( float fSize )
 	if ( fSize < 0 ) fSize = 0;
 	m_fOrigSize = fSize;
 	m_fSize = fSize;
+	int updateRequired = 0;
 
 	if ( m_pFTFont )
 	{
+		if ( m_fHorizontalRatio != agk::DeviceToDisplayRatioX() || m_fVerticalRatio != agk::DeviceToDisplayRatioY() ) updateRequired = 1;
+
 		m_fHorizontalRatio = agk::DeviceToDisplayRatioX();
 		m_fVerticalRatio = agk::DeviceToDisplayRatioY();
 		
 		int pixelSize = agk::Round( m_fOrigSize/m_fVerticalRatio );
 		m_fSize = pixelSize * m_fVerticalRatio;
+
 		AGKSizedFont *pNewFont = m_pFTFont->GetSizedFont( pixelSize );
 		float newScale = m_fFontScale;
 		if ( pNewFont ) newScale = pixelSize / (float) pNewFont->GetSize();
@@ -1281,7 +1317,7 @@ void cText::SetSize( float fSize )
 		}
 		else
 		{
-			if ( m_fFontScale != newScale )
+			if ( m_fFontScale != newScale || updateRequired )
 			{
 				for ( UINT i = 0; i < m_iNumSprites; i++ )
 				{
@@ -1347,6 +1383,17 @@ void cText::SetOverrideScissor( int mode )
 {
 	if ( mode == 0 ) m_bFlags &= ~AGK_TEXT_OVERRIDE_SCISSOR;
 	else m_bFlags |= AGK_TEXT_OVERRIDE_SCISSOR;
+}
+
+void cText::SetSnap( int mode ) 
+{ 
+	if ( mode ) m_bFlags |= AGK_TEXT_SNAP_TO_PIXELS; 
+	else m_bFlags &= ~AGK_TEXT_SNAP_TO_PIXELS; 
+
+	for ( UINT i = 0; i < m_iNumSprites; i++ )
+	{
+		m_pSprites[ i ]->SetSnap( mode );
+	}
 }
 
 void cText::SetSpacing( float fSpacing )
@@ -1559,9 +1606,14 @@ void cText::SetFont( AGKFont *pFont )
 			m_pFTSizedFont = 0;
 		}
 	}
+	else
+	{
+		// switching from bitmap fonts to new fonts
+		SetSnap( 1 );
+	}
 
 	m_pFTFont = pFont;
-
+	
 	if ( m_pFTFont )
 	{
 		SetSize( m_fOrigSize ); // this regenerates the font for all sprites
@@ -1789,7 +1841,7 @@ bool cText::GetHitTest( float x, float y )
 	}
 
 	// scissor test
-	if ( m_fClipX != m_fClipX2 && m_fClipY != m_fClipY2 )
+	if ( m_fClipX2 != 0 || m_fClipX != 0 || m_fClipY != 0 || m_fClipY2 != 0 )
 	{
 		if ( x < m_fClipX || x > m_fClipX2 || y < m_fClipY || y > m_fClipY2 ) return false;
 	}
@@ -1858,7 +1910,7 @@ void cText::SetScissor( float x, float y, float x2, float y2 )
 
 void cText::GetClipValues( int &x, int &y, int &width, int &height )
 {
-	if ( (m_fClipX2 == m_fClipX) || (m_fClipY == m_fClipY2) )
+	if ( m_fClipX2 == 0 && m_fClipX == 0 && m_fClipY == 0 && m_fClipY2 == 0 )
 	{
 		x = 0;
 		y = 0;
@@ -1937,7 +1989,7 @@ void cText::Draw()
 	{
 		GetClipValues( iScissorX, iScissorY, iScissorWidth, iScissorHeight );
 		
-		if ( iScissorWidth > 0 && iScissorHeight > 0 )
+		if ( iScissorX != 0 || iScissorY != 0 || iScissorWidth != 0 || iScissorHeight != 0 )
 		{
 			agk::PlatformScissor( iScissorX, iScissorY, iScissorWidth, iScissorHeight );
 		}
@@ -1952,7 +2004,7 @@ void cText::Draw()
 
 	if ( (m_bFlags & AGK_TEXT_OVERRIDE_SCISSOR) == 0 )
 	{
-		if ( iScissorWidth > 0 && iScissorHeight > 0 )
+		if ( iScissorX != 0 || iScissorY != 0 || iScissorWidth != 0 || iScissorHeight != 0 )
 		{
 			agk::ResetScissor();
 		}

@@ -17,6 +17,7 @@
 		4A01977119CE6053006204A7 /* EventKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A01977019CE6053006204A7 /* EventKit.framework */; };
 		4A01977319CE6063006204A7 /* EventKitUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A01977219CE6063006204A7 /* EventKitUI.framework */; };
 		4A01977519CE608F006204A7 /* CoreTelephony.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A01977419CE608F006204A7 /* CoreTelephony.framework */; };
+		4A02FCFC22B015FD00BECD20 /* UserNotifications.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A02FCFB22B015FD00BECD20 /* UserNotifications.framework */; };
 		4A0A413F1D9EADF90065F425 /* FirebaseAnalytics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A0A413A1D9EADF90065F425 /* FirebaseAnalytics.framework */; };
 		4A0A41401D9EADF90065F425 /* FirebaseInstanceID.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A0A413B1D9EADF90065F425 /* FirebaseInstanceID.framework */; };
 		4A0A41451D9EAE0B0065F425 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A0A41441D9EAE0B0065F425 /* libsqlite3.tbd */; };
@@ -45,6 +46,7 @@
 		4A88FF8919EC4E7A00982F31 /* FacebookSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A88FF8819EC4E7A00982F31 /* FacebookSDK.framework */; };
 		4A952B131FA00CE2006F2215 /* WatchConnectivity.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4A952B121FA00CE2006F2215 /* WatchConnectivity.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		4A9D50791996814400473873 /* ProgramData.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4A9D50781996814400473873 /* ProgramData.cpp */; };
+		4AAAB70921C04875003BE3C8 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4AAAB70821C04875003BE3C8 /* WebKit.framework */; };
 		726A37B315B8DA0D002F8919 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 726A37B215B8DA0D002F8919 /* StoreKit.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
 		72EF411914632D6400C96B0A /* UntitledViewController.xib in Resources */ = {isa = PBXBuildFile; fileRef = 72EF411814632D6400C96B0A /* UntitledViewController.xib */; };
 		9B0A5AAF13269BF4006B5FB6 /* interpreter.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9B0A5AAD13269BF4006B5FB6 /* interpreter.cpp */; };
@@ -67,7 +69,7 @@
 		1D30AB110D05D00D00671497 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		1D3623240D0F684500981E51 /* Core.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; path = Core.h; sourceTree = "<group>"; };
 		1D3623250D0F684500981E51 /* Core.m */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; path = Core.m; sourceTree = "<group>"; };
-		1D6058910D05DD3D006BFB54 /* AGK 2 Player.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "AGK 2 Player.app"; path = "AppGameKit Player.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1D6058910D05DD3D006BFB54 /* AppGameKit Player.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "AppGameKit Player.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1DF5F4DF0D08C38300B7A737 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		28FD14FC0DC6FC130079059D /* EAGLView.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; path = EAGLView.h; sourceTree = "<group>"; };
 		28FD14FD0DC6FC130079059D /* EAGLView.m */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; path = EAGLView.m; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 		4A01977019CE6053006204A7 /* EventKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = EventKit.framework; path = System/Library/Frameworks/EventKit.framework; sourceTree = SDKROOT; };
 		4A01977219CE6063006204A7 /* EventKitUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = EventKitUI.framework; path = System/Library/Frameworks/EventKitUI.framework; sourceTree = SDKROOT; };
 		4A01977419CE608F006204A7 /* CoreTelephony.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreTelephony.framework; path = System/Library/Frameworks/CoreTelephony.framework; sourceTree = SDKROOT; };
+		4A02FCFB22B015FD00BECD20 /* UserNotifications.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UserNotifications.framework; path = System/Library/Frameworks/UserNotifications.framework; sourceTree = SDKROOT; };
 		4A0A413A1D9EADF90065F425 /* FirebaseAnalytics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FirebaseAnalytics.framework; path = "../../platform/apple/Source/Social Plugins/Firebase/FirebaseAnalytics.framework"; sourceTree = "<group>"; };
 		4A0A413B1D9EADF90065F425 /* FirebaseInstanceID.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FirebaseInstanceID.framework; path = "../../platform/apple/Source/Social Plugins/Firebase/FirebaseInstanceID.framework"; sourceTree = "<group>"; };
 		4A0A41441D9EAE0B0065F425 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
@@ -106,6 +109,7 @@
 		4A88FF8819EC4E7A00982F31 /* FacebookSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = FacebookSDK.framework; path = "../../platform/apple/Source/Social Plugins/FacebookSDK/FacebookSDK.framework"; sourceTree = "<group>"; };
 		4A952B121FA00CE2006F2215 /* WatchConnectivity.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WatchConnectivity.framework; path = System/Library/Frameworks/WatchConnectivity.framework; sourceTree = SDKROOT; };
 		4A9D50781996814400473873 /* ProgramData.cpp */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.objcpp; fileEncoding = 4; name = ProgramData.cpp; path = ../../interpreter/ProgramData.cpp; sourceTree = "<group>"; };
+		4AAAB70821C04875003BE3C8 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		726A37B215B8DA0D002F8919 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		72EF411814632D6400C96B0A /* UntitledViewController.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; path = UntitledViewController.xib; sourceTree = "<group>"; };
 		8D1107310486CEB800E47090 /* agkinterpreter-Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = "agkinterpreter-Info.plist"; plistStructureDefinitionIdentifier = "com.apple.xcode.plist.structure-definition.iphone.info-plist"; sourceTree = "<group>"; };
@@ -167,6 +171,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4A02FCFC22B015FD00BECD20 /* UserNotifications.framework in Frameworks */,
+				4AAAB70921C04875003BE3C8 /* WebKit.framework in Frameworks */,
 				4A58BA69206AA5950038F2F0 /* ARKit.framework in Frameworks */,
 				4A952B131FA00CE2006F2215 /* WatchConnectivity.framework in Frameworks */,
 				4A5FF6F81F6C301400BFF8C8 /* ReplayKit.framework in Frameworks */,
@@ -226,7 +232,7 @@
 		19C28FACFE9D520D11CA2CBB /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1D6058910D05DD3D006BFB54 /* AGK 2 Player.app */,
+				1D6058910D05DD3D006BFB54 /* AppGameKit Player.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -279,6 +285,8 @@
 		29B97323FDCFA39411CA2CEA /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				4A02FCFB22B015FD00BECD20 /* UserNotifications.framework */,
+				4AAAB70821C04875003BE3C8 /* WebKit.framework */,
 				4A58BA68206AA5940038F2F0 /* ARKit.framework */,
 				4A952B121FA00CE2006F2215 /* WatchConnectivity.framework */,
 				4A5FF6F71F6C301400BFF8C8 /* ReplayKit.framework */,
@@ -383,7 +391,7 @@
 			);
 			name = agk_interpreter;
 			productName = iphone_app;
-			productReference = 1D6058910D05DD3D006BFB54 /* AGK 2 Player.app */;
+			productReference = 1D6058910D05DD3D006BFB54 /* AppGameKit Player.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -500,9 +508,10 @@
 					../../platform/apple/Source,
 					../../bullet,
 					../../bullet/BulletCollision/CollisionShapes,
+					../interpreter,
 				);
 				INFOPLIST_FILE = "agkinterpreter-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 7.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
 				LIBRARY_SEARCH_PATHS = "\"../../platform/apple/Lib/Release\"";
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "-ObjC";
@@ -545,9 +554,10 @@
 					../../platform/apple/Source,
 					../../bullet,
 					../../bullet/BulletCollision/CollisionShapes,
+					../interpreter,
 				);
 				INFOPLIST_FILE = "agkinterpreter-Info.plist";
-				IPHONEOS_DEPLOYMENT_TARGET = 7.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
 				LIBRARY_SEARCH_PATHS = "\"../../platform/apple/Lib/Release\"";
 				OTHER_CFLAGS = "-DNS_BLOCK_ASSERTIONS=1";
 				OTHER_LDFLAGS = "-ObjC";

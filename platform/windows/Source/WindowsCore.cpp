@@ -1454,6 +1454,33 @@ void agk::SetScreenResolution( int width, int height )
 	agk::SetWindowSize( width, height, 0 );
 }
 
+//****f* Core/Misc/GetURLSchemeText
+// FUNCTION
+//   On Android and iOS this returns the full URL that was used to open this app if a URL scheme was used. For example if you 
+//   have set the URL scheme "myapp" for this app and the user clicks on a link such as "myapp://sometext", then the OS will
+//   open your app and GetURLSchemeText will return "myapp://sometext" until the app is next opened. If a URL was not used
+//   to open the app, or the platform doesn't support URL schemes, then an empty string will be returned.<br/><br/>
+//   When choosing a URL scheme you must make sure it is unique to your app, as iOS will not allow two apps to have the same
+//   scheme.
+// SOURCE
+char* agk::GetURLSchemeText()
+//****
+{
+	char* str = new char[1]; *str = 0;
+	return str;
+}
+
+//****f* Core/Misc/ClearURLSchemeText
+// FUNCTION
+//   Clears the currently stored URL scheme text so you can signal that you have acted upon it. This is not necessary but
+//   can make your code easier by not having to remember that you have dealt with a URL scheme event.
+// SOURCE
+void agk::ClearURLSchemeText()
+//****
+{
+
+}
+
 void agk::GetDeviceName( uString &outString )
 {
 	outString.SetStr( "windows" );
@@ -1549,6 +1576,8 @@ int agk::GetDeviceNetworkType()
 //   in its internal storage. In some cases these may be the same. This command returns -1 if the space 
 //   available could not be determined. Currently only implemented on iOS and Android, other platforms will 
 //   return -1.
+// INPUTS
+//   path -- The path to check
 // SOURCE
 int agk::GetStorageRemaining( const char *path )
 //****
@@ -1563,6 +1592,8 @@ int agk::GetStorageRemaining( const char *path )
 //   a path that points to the AGK write folder will return the number of MB in the internal storage. In 
 //   some cases these may be the same. This command returns -1 if the storage size could not be determined. 
 //   Currently only implemented on iOS and Android, other platforms will return -1.
+// INPUTS
+//   path -- The path to check
 // SOURCE
 int agk::GetStorageTotal( const char *path )
 //****
@@ -1658,6 +1689,22 @@ void agk::SetExpansionFileVersion(int version)
 //   being downloaded, and 3 if everything has completed and the file exists.
 // SOURCE
 int agk::GetExpansionFileState()
+//****
+{
+	return 0;
+}
+
+//****f* Core/Misc/GetExpansionFileError
+// FUNCTION
+//   Returns the error code of the most recent error that occurred when downloading the expansion file. Possible errors
+//   include:<br/>
+//      15 = Unlicensed<br/>
+//      16 = Failed fetching URL<br/>
+//      17 = SDcard full<br/>
+//      18 = Cancelled<br/>
+//      19 = Unknown error
+// SOURCE
+int agk::GetExpansionFileError()
 //****
 {
 	return 0;
@@ -1924,9 +1971,10 @@ BOOL __stdcall InputEnumCallback( LPCDIDEVICEINSTANCE device, void* ptr )
 		}
 
 		cJoystick *pJoystick = new cJoystick( pDevice );
+		pJoystick->SetName( device->tszProductName );
 
 		pDevice->EnumObjects( InputEnumObjectsCallback, pDevice, DIDFT_ALL );
-		pDevice->SetDataFormat( &c_dfDIJoystick );
+		pDevice->SetDataFormat( &c_dfDIJoystick2 );
 		if ( g_bGLInit && g_hWnd ) pDevice->SetCooperativeLevel( g_hWnd, DISCL_EXCLUSIVE | DISCL_FOREGROUND );
 
 		pDevice->Acquire();
@@ -1958,7 +2006,8 @@ UINT STDCALL DirectInputEnumThread( void *pParams )
 			if ( iIndex >= AGK_NUM_JOYSTICKS ) return 0;
 
 			cJoystick *pJoystick = new cJoystick( (void*) i, 1 );
-
+			pJoystick->SetName( "XInput Device" );
+			
 			pJoysticks[ iIndex ] = pJoystick;
 		}
 	}
@@ -2588,12 +2637,14 @@ void agk::SetVSync( int mode )
 		}
 	}
 
+	/* some monitors can go up to 240Hz with vsync enabled
 	if ( mode > 0 )
 	{
 		// assuming a vsync rate of 60fps we should set the sync rate to slightly higher to catch any 
 		// devices that ignore the vsync command
 		m_fSyncTime = 1 / 200.0f;
 	}
+	*/
 }
 
 //****f* Core/Display/GetMaxDeviceWidth
@@ -2601,7 +2652,7 @@ void agk::SetVSync( int mode )
 //   Gets the maximum width that your app window can be. For platforms that support windowed mode such as Windows and Mac
 //   your app can only achieve this size in full screen mode as windowed mode has a border around your app.
 //   For HTML5 apps this will return the size of the current HTML document, and is not guaranteed to work if the HTML5 app 
-//   is running in full screen mode.
+//   is running in full screen mode. A better name for this command would be GetMaxWindowWidth, but it is now set in stone.
 // SOURCE
 int agk::GetMaxDeviceWidth()
 //****
@@ -2616,7 +2667,7 @@ int agk::GetMaxDeviceWidth()
 //   Gets the maximum height that your app window can be. For platforms that support windowed mode such as Windows and Mac
 //   your app can only achieve this size in full screen mode as windowed mode has a border around your app.
 //   For HTML5 apps this will return the size of the current HTML document, and is not guaranteed to work if the HTML5 app 
-//   is running in full screen mode.
+//   is running in full screen mode. A better name for this command would be GetMaxWindowHeight, but it is now set in stone.
 // SOURCE
 int agk::GetMaxDeviceHeight()
 //****
@@ -2762,6 +2813,13 @@ void agk::PlatformSync ( void )
 	{
 		DwmFlush();
 	}
+
+	if ( (GetAsyncKeyState( VK_LSHIFT ) & 0x8000) == 0 ) agk::KeyUp( 257 );
+	if ( (GetAsyncKeyState( VK_RSHIFT ) & 0x8000) == 0 ) agk::KeyUp( 258 );
+	if ( (GetAsyncKeyState( VK_LCONTROL ) & 0x8000) == 0 ) agk::KeyUp( 259 );
+	if ( (GetAsyncKeyState( VK_RCONTROL ) & 0x8000) == 0 ) agk::KeyUp( 260 );
+	if ( (GetAsyncKeyState( VK_LMENU ) & 0x8000) == 0 ) agk::KeyUp( 261 );
+	if ( (GetAsyncKeyState( VK_RMENU ) & 0x8000) == 0 ) agk::KeyUp( 262 );
 }
 
 void agk::PlatformCompleteInputInit()
@@ -4538,6 +4596,66 @@ void agk::VibrateDevice( float seconds )
 	// do nothing
 }
 
+//****f* Extras/Clipboard/SetClipboardText
+// FUNCTION
+//   Sets the device clipboard to the specified text, this overwrites anything that was previously in the device clipboard. 
+//   The clipboard is the same as that used by the copy/paste functionality of the device.
+// INPUTS
+//   szText -- The text to copy
+// SOURCE
+void agk::SetClipboardText( const char* szText )
+//****
+{
+	if ( !OpenClipboard( 0 ) ) return;
+	EmptyClipboard();
+	int length = strlen(szText) + 1;
+	HGLOBAL hg = GlobalAlloc( GMEM_MOVEABLE, length );
+	if ( !hg ) 
+	{
+		CloseClipboard();
+		return;
+	}
+	memcpy( GlobalLock(hg), szText, length );
+	GlobalUnlock( hg );
+	SetClipboardData( CF_TEXT, hg );
+	CloseClipboard();
+	GlobalFree(hg);
+}
+
+//****f* Extras/Clipboard/GetClipboardText
+// FUNCTION
+//   Gets any text currently held in the device clipboard, the text remains in the clipboard so it can still be used by other apps. 
+//   The clipboard is the same as that used by the copy/paste functionality of the device.
+// SOURCE
+char* agk::GetClipboardText()
+//****
+{
+	if ( !OpenClipboard( 0 ) ) goto error;
+	HANDLE hData = GetClipboardData( CF_TEXT );
+	if ( !hData ) 
+	{
+		CloseClipboard();
+		goto error;
+	}
+
+	char* szData = (char*)GlobalLock( hData );
+	if ( !szData ) goto error;
+
+	int length = strlen( szData ) + 1;
+
+	char *str = new char[ length ]; 
+	strcpy( str, szData );
+
+	GlobalUnlock( hData );
+	CloseClipboard();
+
+	return str;
+
+error:
+	char *str2 = new char[1]; *str2 = 0;
+	return str2;
+}
+
 // Music
 
 void cMusicMgr::PlatformAddFile( cMusic *pMusic )
@@ -5355,7 +5473,7 @@ void cSoundMgr::PlatformUpdate()
 			if ( pSound->m_pSourceVoice ) pSound->m_pSourceVoice->GetState( &state );
 			else pSound->m_pSourceVoiceWin8->GetState( &state, /*XAUDIO2_VOICE_NOSAMPLESPLAYED*/ 0x100 );
 			
-			if ( state.BuffersQueued == 1 && (pSound->m_iLoop == 1 || pSound->m_iLoopCount+1 < pSound->m_iLoop) )
+			if ( state.BuffersQueued <= 1 && (pSound->m_iLoop == 1 || pSound->m_iLoopCount+1 < pSound->m_iLoop) )
 			{
 				pSound->m_iLoopCount++;
 				if ( pSound->m_iLoop == 1 || pSound->m_iLoopCount+1 < pSound->m_iLoop ) 
@@ -5750,6 +5868,30 @@ void cSoundMgr::PlatformResumeInstances( UINT iID )
 	}
 }
 */
+
+//****f* Video/Youtube/PlayYoutubeVideo
+// FUNCTION
+//   Plays the specified Youtube video in a separate window above your app. For Android you must enable the Youtube 
+//   Data API v3 in the Google Cloud Console for your app, and create an API key for it in the credentials section. 
+//   You can create a key specifically for use with the Youtube API, or you can use an unrestricted key that can be 
+//   used by multiple APIs. The videoID is the string that follows the ?v= part of a Youtube URL, e.g. "eLIgxYHCgWA". 
+//   You can also specify a start time to start playing the video from part way through instead of starting from the 
+//   beginning. The time is specified in seconds and accepts decimal values to represent fractions of a second.<br/>
+//   <br/>
+//   On Windows, Mac, and Linux this command will open the default browser to play the Youtube video. The developer 
+//   key field is only required on Android.
+// INPUTS
+//   developerKey -- The API key credential created in the Google Cloud Console for the Youtube Data API v3.
+//   videoID -- The ID of the video, e.g. eLIgxYHCgWA
+//   startTime -- The seek time in seconds from which to start playing the video
+// SOURCE
+void agk::PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime )
+//****
+{
+	uString sURL;
+	sURL.Format( "https://www.youtube.com/watch?v=%s&t=%d", videoID, (int)startTime );
+	OpenBrowser( sURL );
+}
 
 // video commands 
 
@@ -6913,7 +7055,7 @@ float agk::GetVideoDuration()
 
 //****f* Video/General/SetVideoVolume
 // FUNCTION
-//   Currently not functional.
+//   Sets the volume of the video from 0 (muted) to 100 (full volume)
 // INPUTS
 //   volume -- The volume of the video in the range 0-100.
 // SOURCE
@@ -7051,10 +7193,12 @@ void agk::SetVideoPosition( float seconds )
 //   recording. Unfortunately Android does not support recording audio directly from the app, so using 
 //   a value of 0 will produce a silent video. The audio output from the app may be audible through the 
 //   microphone recording though. Recording through the microphone requires that you enable the 
-//   "Record Audio" permission when exporting your APK. On iOS a microphone value of 1 will record both
+//   "RecordAudio" permission when exporting your APK. On iOS a microphone value of 1 will record both
 //   the app audio output and the microphone, a value of 0 will only record the app audio.<br/><br/>
-//   On Android the recording may stop at any time, for example if the app is sent to the background, or
-//   if another activity is activated such as an In App Purchase, or using the <i>FacebookLogin</i> command.
+//   On Android 6 and below the recording may stop at any time, for example if the app is sent to the 
+//   background, or if another activity is activated such as an In App Purchase, or using the 
+//   <i>FacebookLogin</i> command. On Android 7 and above the recording will pause when the app is in the
+//   background and resume when the app resumes.
 //   On iOS the recording will continue after such interuptions, until <i>StopScreenRecording</i> is called.
 // INPUTS
 //   szFilename -- The path to save the video, should end in .mp4, can be a "raw:" file path
@@ -7294,6 +7438,20 @@ char* agk::GetSpeechVoiceName( int index )
     return str;
 }
 
+//****f* Sound/TextToSpeech/GetSpeechVoiceID
+// FUNCTION
+//   Returns the ID of the given voice. The ID can be used with <i>SetSpeechLanguageByID</i> to select a 
+//   specific voice.
+// INPUTS
+//   index -- The index of the voice to check, starts at 0 for the first voice
+// SOURCE
+char* agk::GetSpeechVoiceID( int index )
+//****
+{
+    char *str = new char[1]; *str = 0;
+    return str;
+}
+
 //****f* Sound/TextToSpeech/SetSpeechLanguage
 // FUNCTION
 //   Sets the language to use when speaking text, for example "en_GB" for British English, "en_US" for
@@ -7307,6 +7465,19 @@ char* agk::GetSpeechVoiceName( int index )
 //   lang -- The language to use for speaking text, default is the device's current language.
 // SOURCE
 void agk::SetSpeechLanguage( const char* lang )
+//****
+{
+
+}
+
+//****f* Sound/TextToSpeech/SetSpeechLanguageByID
+// FUNCTION
+//   Sets the language to use when speaking text by voice ID. The ID can be found with <i>GetSpeechVoiceID</i>, 
+//   and is necessary when multiple voices have the same language but with different accents.
+// INPUTS
+//   sID -- The language to use for speaking text, default is the device's current language.
+// SOURCE
+void agk::SetSpeechLanguageByID( const char* sID )
 //****
 {
 
@@ -7467,6 +7638,8 @@ void AGKThread::PlatformSleepSafe( UINT milliseconds )
 //   folder on Android, which is guaranteed to allow write access.<br/><br/>
 //   This command is now deprecated. The preferred method of accessing files outside of the usual write
 //   folder is to use the <i>OpenRawFolder</i> commands and "raw:" file paths.
+// INPUTS
+//   str -- The path to use as the write folder
 // SOURCE
 void agk::SetRawWritePath( const char* str )
 //****
@@ -8697,7 +8870,7 @@ int agk::SetCurrentDir( const char* szPath )
 	if ( strcmp( szPath, ".." ) == 0 ) 
 	{
 		int pos = m_sCurrentDir.Find( '/' );
-		if ( pos >= 0 && pos < m_sCurrentDir.GetLength()-1 )
+		if ( pos >= 0 && pos < ((int)m_sCurrentDir.GetLength())-1 )
 		{
 			m_sCurrentDir.Trunc( '/' );
 			m_sCurrentDir.Trunc( '/' );
@@ -9008,8 +9181,8 @@ void cJoystick::PlatformUpdate()
 			}
 		}
 
-		DIJOYSTATE js;
-		hr = pDevice->GetDeviceState(sizeof(DIJOYSTATE), &js);
+		DIJOYSTATE2 js;
+		hr = pDevice->GetDeviceState(sizeof(DIJOYSTATE2), &js);
 		if ( FAILED(hr) ) 
 		{
 			m_iConnected = 0;
@@ -9026,7 +9199,15 @@ void cJoystick::PlatformUpdate()
 		m_fRY = (js.lRy / 32768.0f);
 		m_fRZ = (js.lRz / 32768.0f);
 
-		for ( UINT j = 0; j < 32; j++ ) m_iButtons[ j ] = js.rgbButtons[ j ] != 0 ? 1 : 0;
+		m_iSlider[ 0 ] = js.rglSlider[ 0 ];
+		m_iSlider[ 1 ] = js.rglSlider[ 1 ];
+
+		m_iPOV[ 0 ] = js.rgdwPOV[ 0 ];
+		m_iPOV[ 1 ] = js.rgdwPOV[ 1 ];
+		m_iPOV[ 2 ] = js.rgdwPOV[ 2 ];
+		m_iPOV[ 3 ] = js.rgdwPOV[ 3 ];
+
+		for ( UINT j = 0; j < AGK_MAX_JOYSTICK_BUTTONS; j++ ) m_iButtons[ j ] = js.rgbButtons[ j ] != 0 ? 1 : 0;
 	}
 	else if ( m_iDeviceType == 1 )
 	{
@@ -9275,7 +9456,9 @@ void cEditBox::PlatformUpdateTextEnd()
 
 //****f* HTTP/General/OpenBrowser
 // FUNCTION
-//   Opens the default browser of the current platform with points it to the page given.
+//   Opens the default browser of the current platform and points it to the page given.
+// INPUTS
+//   url -- THe url to open
 // SOURCE
 void agk::OpenBrowser( const char *url )
 //****
@@ -9484,6 +9667,21 @@ void agk::ShareImageAndText( const char* szFilename, const char* szText )
 
 }
 
+//****f* Core/External Apps/ShareFile
+// FUNCTION
+//   Sends the given file to the operating system which will then ask the user how they want to share it, 
+//   e.g. through email, NFC, etc. The file can be in your read or write folder, or you can 
+//   use a "raw:" path to load from anywhere, you should provide the filename as if you were loading the 
+//   file. This only works on iOS and Android.
+// INPUTS
+//   szFilename -- The path to the file to share
+// SOURCE
+void agk::ShareFile( const char* szFilename )
+//****
+{
+
+}
+
 //****f* Extras/Facebook/FacebookActivateAppTracking
 // FUNCTION
 //   Activates tracking in the Facebook SDK, this is useful if you are using Facebook Ads as this will 
@@ -9521,12 +9719,14 @@ int agk::GetInternetState()
 
 //****f* Extras/PushNotifications/SetPushNotificationKeys
 // FUNCTION
-//   This command is no longer needed on any platform and now does nothing
+//   This command is used on Android to set the SenderID used by the Firebase project. Currently keyName must be 
+//   set to "SenderID" (case sensitive), and the keyValue must be set to the SenderID value that can be found in
+//   your Firebase project settings, in the Cloud Messaging tab.
 // INPUTS
-//   data1 -- your key data
-//   reserved -- not currently used, must be an empty string
+//   keyName -- The key to set
+//   keyValue -- The key value
 // SOURCE
-void agk::SetPushNotificationKeys( const char* data1, const char* reserved )
+void agk::SetPushNotificationKeys( const char* keyName, const char* keyValue )
 //****
 {
 	// do nothing on windows
@@ -9976,8 +10176,7 @@ float agk::GetRawGPSAltitude()
 
 //****f* Extras/GameCenter/GetGameCenterExists
 // FUNCTION
-//   Returns 1 if the current platform supports Game Center. 
-//   Works with iOS, Google Game Services, and Amazon GameCircle.
+//   Returns 1 if the current platform supports Game Center or Google Play Games. 
 // SOURCE
 int agk::GetGameCenterExists()
 //****
@@ -9997,9 +10196,9 @@ void agk::GameCenterSetup()
 
 //****f* Extras/GameCenter/GameCenterLogin
 // FUNCTION
-//   Call this once to log the user in to Game Center, if they are already logged in to the Game Center
-//   app then this happens in the background and does not interrupt the user, otherwise a popup will 
-//   appear asking them to log in.
+//   Call this once to log the user in to Game Center (iOS) or Google Play Games (Android), if they have 
+//   logged in before this happens in the background and does not interrupt the user, otherwise a popup will 
+//   appear asking them to log in and grant permission to continue.
 // SOURCE
 void agk::GameCenterLogin()
 //****
@@ -10007,9 +10206,20 @@ void agk::GameCenterLogin()
 	
 }
 
+//****f* Extras/GameCenter/GameCenterLogout
+// FUNCTION
+//   Call this to log the user out of Google Play Games. After this you may call <i>GameCenterLogin</i>
+//   again. On Game Center (iOS) this has no affect, the user must logout from the Game Center app.
+// SOURCE
+void agk::GameCenterLogout()
+//****
+{
+	
+}
+
 //****f* Extras/GameCenter/GetGameCenterLoggedIn
 // FUNCTION
-//   Will return 1 if the user is logged in to Game Center, 0 if not. The login process is Asynchronous 
+//   Will return 1 if the user is logged in to Game Center or Google Play Games, 0 if not. The login process is Asynchronous 
 //   so after calling <i>GameCenterLogin</i> it may take a few seconds for this command to return 1.
 //   If the user fails to login or GameCenter is not available then this will return -1.
 // SOURCE
@@ -10136,7 +10346,7 @@ void agk::GameCenterAchievementsReset ( )
 int agk::CheckPermission( const char* szPermission )
 //****
 {
-	return 1;
+	return 2;
 }
 
 //****f* Extras/Permissions/RequestPermission
@@ -10211,7 +10421,8 @@ void agk::SetupCloudData( const char* reserved )
 //   or block access yet, this will be prompted in <i>SetupCloudData</i> if applicable. Returns -1 if the user has 
 //   specifically denied access. Returns -2 if the user is not logged in or the device does not have iCloud or 
 //   Google Drive. You can prompt the user to login and enable these when your app first starts, or when they
-//   choose to enable cloud backup in your own app settings.
+//   choose to enable cloud backup in your own app settings. If this command returns -3 on Android then the Google 
+//   cloud data has become corrupted and must be cleared in the Drive settings.
 // SOURCE
 int agk::GetCloudDataAllowed()
 //****
@@ -10376,8 +10587,7 @@ char* agk::LoadSharedVariable( const char *varName, const char *defaultValue )
 //   Once the variable is deleted then <i>LoadSharedVariable</i> will return the default value for 
 //   any requests to load it.
 // INPUTS
-//   varName -- The name to use to identify this variable
-//   varValue -- The value to save in this variable
+//   varName -- The name of the variable to delete
 // SOURCE
 void agk::DeleteSharedVariable( const char *varName )
 //****

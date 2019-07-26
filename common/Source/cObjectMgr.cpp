@@ -127,12 +127,17 @@ void cObjectMgr::RemoveObject( cObject3D* object )
 		pMember = pMember->m_pNext;
 	}
 
-	for ( int i = 0; i < m_iNumAlphaObjects; i++ )
+	if ( m_pAlphaObjectsArray )
 	{
-		if ( m_pAlphaObjectsArray[ i ] && m_pAlphaObjectsArray[ i ]->GetType() == 1 && m_pAlphaObjectsArray[ i ]->GetObject() == object ) 
+		for ( int i = 0; i < m_iNumAlphaObjects; i++ )
 		{
-			m_pAlphaObjectsArray[ i ] = 0;
-			break;
+			cObjectContainer *pContainer = (cObjectContainer*) m_pAlphaObjectsArray[ i ].ptr;
+			if ( pContainer && pContainer->GetType() == 1 && pContainer->GetObject() == object ) 
+			{
+				m_pAlphaObjectsArray[ i ].iValue = 0xFFFFFFFF;
+				m_pAlphaObjectsArray[ i ].ptr = 0;
+				break;
+			}
 		}
 	}
 
@@ -268,7 +273,7 @@ void cObjectMgr::ResortAll()
 	{
 		if ( m_pAlphaObjectsArray ) delete [] m_pAlphaObjectsArray;
 		m_pAlphaObjectsArray = 0;
-		if ( alphaCount > 0 ) m_pAlphaObjectsArray = new cObjectContainer*[ alphaCount ];
+		if ( alphaCount > 0 ) m_pAlphaObjectsArray = new AGKSortValue[ alphaCount ];
 	}
 
 	m_iNumAlphaObjects = alphaCount;
@@ -276,32 +281,25 @@ void cObjectMgr::ResortAll()
 	// rebuild transparent array
 	alphaCount = 0;
 	pMember = m_pAlphaObjects;
+	cObject3D* tmpobj;
 	while ( pMember )
 	{
-		m_pAlphaObjectsArray[ alphaCount ] = pMember;
+		m_pAlphaObjectsArray[ alphaCount ].ptr = pMember;
+		m_pAlphaObjectsArray[ alphaCount ].iValue = 0;
+
+		if (g_pCurrentCamera) {
+			tmpobj = ((cObject3D*) pMember->GetObject()); 
+			float dist = -tmpobj->posFinal().GetSqrDist( g_pCurrentCamera->posFinal() ); // negative so it sorts in reverse order
+			m_pAlphaObjectsArray[ alphaCount ].iValue = agk::SortFloatToUINT( dist );
+		}
+
 		alphaCount++;
 		
 		pMember = pMember->m_pNext;
 	}
 
 	// sort transparent objects
-	// todo don't use qsort
-	if ( m_pAlphaObjectsArray && g_pCurrentCamera ) qsort( m_pAlphaObjectsArray, m_iNumAlphaObjects, sizeof(cObjectContainer*), cObjectMgr::ContainerCompare );
-}
-
-int cObjectMgr::ContainerCompare( const void* a, const void* b )
-{
-	if ( !g_pCurrentCamera ) return 0;
-
-	cObject3D* obj1 = (*(cObjectContainer**)a)->GetObject();
-	cObject3D* obj2 = (*(cObjectContainer**)b)->GetObject();
-
-	float dist1 = obj1->posFinal().GetSqrDist( g_pCurrentCamera->posFinal() );
-	float dist2 = obj2->posFinal().GetSqrDist( g_pCurrentCamera->posFinal() );
-
-	if ( dist2 == dist1 ) return 0;
-	else if ( dist2 < dist1 ) return -1; // b is closer to the camera than a
-	else return 1;
+	agk::SortArray( m_pAlphaObjectsArray, m_iNumAlphaObjects );
 }
 
 void cObjectMgr::SetCurrentCamera( cCamera* pCamera )
@@ -326,10 +324,11 @@ void cObjectMgr::DrawAll()
 	{
 		for ( int i = 0 ; i < m_iNumAlphaObjects; i++ )
 		{
-			if ( m_pAlphaObjectsArray[ i ] && m_pAlphaObjectsArray[ i ]->GetType() == 1 )
+			cObjectContainer *pContainer = (cObjectContainer*) m_pAlphaObjectsArray[ i ].ptr;
+			if ( pContainer && pContainer->GetType() == 1 )
 			{
 				m_iLastDrawn++;
-				m_pAlphaObjectsArray[ i ]->GetObject()->Draw();
+				pContainer->GetObject()->Draw();
 			}
 		}
 	}

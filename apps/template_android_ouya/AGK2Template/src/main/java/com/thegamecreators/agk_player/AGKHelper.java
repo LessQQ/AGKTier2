@@ -8,6 +8,8 @@ import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.SurfaceTexture;
@@ -22,6 +24,7 @@ import android.os.StatFs;
 import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
+import android.text.InputType;
 import android.view.Surface;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
@@ -55,6 +58,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -121,6 +125,8 @@ import android.content.DialogInterface;
 
 import android.media.MediaMetadataRetriever;
 
+import static android.content.ClipDescription.MIMETYPE_TEXT_PLAIN;
+
 // Used for agk::Message()
 class RunnableMessage implements Runnable
 {
@@ -175,6 +181,7 @@ class RunnableKeyboard implements Runnable
 	public int action = 0;
 	public String text = "";
 	public int multiline = 0;
+	public int inputType = 0; //0=normal, 1=numbers
 	public int cursorpos = 0;
 	
 	public void run() {
@@ -184,6 +191,8 @@ class RunnableKeyboard implements Runnable
 			{
 				AGKHelper.mTextInput = new EditText(act);
 				AGKHelper.mTextInput.setSingleLine(multiline == 0);
+				if ( inputType==1 ) AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED );
+				else AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_TEXT );
 				if ( MyTextWatcher.m_TextWatcher == null ) MyTextWatcher.m_TextWatcher = new MyTextWatcher();
 				if ( MyTextActionWatcher.m_TextActionWatcher == null ) MyTextActionWatcher.m_TextActionWatcher = new MyTextActionWatcher();
 				MyTextActionWatcher.act = act;
@@ -233,6 +242,9 @@ class RunnableKeyboard implements Runnable
 			{
 				if ( AGKHelper.mTextInput != null ) 
 				{
+					AGKHelper.mTextInput.setSingleLine(multiline == 0);
+					if ( inputType==1 ) AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED );
+					else AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_TEXT );
 					AGKHelper.mTextFinished = false;
 					if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
 					AGKHelper.mTextInput.requestFocus();
@@ -245,7 +257,16 @@ class RunnableKeyboard implements Runnable
 			{
 				if ( AGKHelper.mTextInput != null )
 				{
-					if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+					if ( cursorpos >= 0 )
+					{
+						try {
+							AGKHelper.mTextInput.setSelection(cursorpos);
+						}
+						catch( IndexOutOfBoundsException e )
+						{
+							Log.w("Keyboard", "SetCursor index out of bounds: " + cursorpos);
+						}
+					}
 				}
 				break;
 			}
@@ -255,7 +276,7 @@ class RunnableKeyboard implements Runnable
 
 class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, MediaPlayer.OnCompletionListener
 {
-	public MediaPlayer player = null;
+	public volatile MediaPlayer player = null;
 	public Activity act;
 	public SurfaceHolder pHolder = null;
 	public SurfaceTexture pTexture = null;
@@ -264,7 +285,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 	public int m_y = 0;
 	public int m_width = 1;
 	public int m_height = 1;
-	public String m_filename = "";
+	public volatile String m_filename = "";
 	public int m_filetype = 0;
 
 	public int prepared = 0;
@@ -274,9 +295,13 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 	public int completed = 0;
 
 	public int isDisplayed = 0;
-	public int videoWidth = 0;
-	public int videoHeight = 0;
-	public int videoDuration = 0;
+	public volatile int videoWidth = 0;
+	public volatile int videoHeight = 0;
+	public volatile int videoDuration = 0;
+	public volatile int viewAdded = 0;
+	public volatile int shouldRemoveView = 0;
+
+	public float U1, U2, V1, V2;
 
 	public static WindowManager.LayoutParams makeLayout(int x, int y, int width, int height)
 	{
@@ -316,12 +341,19 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 		m_filename = filename;
 		m_filetype = type;
+		U1 = 0;
+		V1 = 0;
+		U2 = 1;
+		V2 = 1;
 
 		if ( player != null )
 		{
-			player.reset();
-			player.release();
-			player = null;
+			synchronized( AGKHelper.videoLock )
+			{
+				player.reset();
+				player.release();
+				player = null;
+			}
 
 			StopVideo();
 		}
@@ -363,11 +395,24 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 					if ( index < 0 )
 					{
 						Log.e("Load Video","Invalid file name for expansion file");
+						m_filename = "";
 						return;
 					}
 					String subfilename = filename.substring(index+1);
-					ZipResourceFile expansionFile = APKExpansionSupport.getAPKExpansionZipFile( act, AGKHelper.g_iExpansionVersion, AGKHelper.g_iExpansionVersion);
+					ZipResourceFile expansionFile = APKExpansionSupport.getAPKExpansionZipFile(act, AGKHelper.g_iExpansionVersion, AGKHelper.g_iExpansionVersion);
+					if ( expansionFile == null )
+					{
+						Log.e("Video","Failed to load expansion file");
+						m_filename = "";
+						return;
+					}
 					AssetFileDescriptor afd = expansionFile.getAssetFileDescriptor(subfilename);
+					if ( afd == null )
+					{
+						Log.e("Video","Failed to find video file in expansion file");
+						m_filename = "";
+						return;
+					}
 					metaRetriever.setDataSource(afd.getFileDescriptor(),afd.getStartOffset(), afd.getLength());
 					tempPlayer.setDataSource(afd.getFileDescriptor(),afd.getStartOffset(), afd.getLength());
 					afd.close();
@@ -377,6 +422,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 				default:
 				{
 					Log.e("Video","Unrecognised file type");
+					m_filename = "";
 					return;
 				}
 			}
@@ -458,21 +504,26 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 		m_filetype = 0;
 		paused = 0;
 
-		if ( isDisplayed == 1 )
+		if ( viewAdded == 1 )
 		{
+			shouldRemoveView = 0;
 			WindowManager wm = (WindowManager) act.getSystemService(Context.WINDOW_SERVICE);
 			wm.removeView(this);
 			isDisplayed = 0;
 		}
+		else shouldRemoveView = 1;
 
-		if ( pTexture != null )
+		synchronized( AGKHelper.videoLock )
 		{
-			pTexture = null;
-			player.reset();
-			player.release();
-			player = null;
+			if ( pTexture != null ) pTexture = null;
+			iLastTex = 0;
+			if ( player != null )
+			{
+				player.reset();
+				player.release();
+				player = null;
+			}
 		}
-		iLastTex = 0;
 	}
 
 	public void PlayVideo()
@@ -492,11 +543,12 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 		if ( pTexture != null )
 		{
-			Log.e("Video","Cannot play to screen whilst the video is playing to a texture");
+			Log.e("Video", "Cannot play to screen whilst the video is playing to a texture");
 			AGKHelper.ShowMessage(act,"Cannot play video to screen whilst the video is playing to a texture");
 		}
 		else
 		{
+			shouldRemoveView = 0;
 			if (isDisplayed == 0) {
 				WindowManager wm = (WindowManager) act.getSystemService(Context.WINDOW_SERVICE);
 				WindowManager.LayoutParams layout = makeLayout(m_x, m_y, m_width, m_height);
@@ -508,7 +560,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 	public void PlayVideoToTexture(int tex)
 	{
-		Log.i("Video", "Play Video");
+		Log.i("Video","Play Video To Image");
 		if ( m_filename.equals("") || m_filename.equals("Error") ) return;
 
 		if ( player != null )
@@ -565,7 +617,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 	public void PauseVideo()
 	{
-		Log.i("Video", "Pause Video");
+		Log.i("Video","Pause Video");
 		if ( m_filename.equals("") || m_filename.equals("Error") ) return;
 
 		paused = 1;
@@ -579,41 +631,63 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 		Log.i("Video","Stop Video");
 		paused = 0;
 
-		if ( isDisplayed == 1 )
+		if ( viewAdded == 1 )
 		{
+			shouldRemoveView = 0;
 			WindowManager wm = (WindowManager) act.getSystemService(Context.WINDOW_SERVICE);
 			wm.removeView(this);
 			isDisplayed = 0;
+			viewAdded = 0;
 		}
+		else shouldRemoveView = 1;
 
-		if ( pTexture != null )
+		synchronized( AGKHelper.videoLock )
 		{
-			pTexture = null;
-			player.reset();
-			player.release();
-			player = null;
+			if ( pTexture != null ) pTexture = null;
+			iLastTex = 0;
+			if ( player != null )
+			{
+				player.reset();
+				player.release();
+				player = null;
+			}
 		}
-		iLastTex = 0;
 	}
 
 	public void UpdateVideo()
 	{
-		if ( pTexture == null ) return;
-		if ( Build.VERSION.SDK_INT < 14 ) return;
+		synchronized( AGKHelper.videoLock )
+		{
+			if (pTexture == null) return;
+			if (Build.VERSION.SDK_INT < 14) return;
 
-		pTexture.updateTexImage();
+			try
+			{
+				pTexture.updateTexImage();
+				float matrix[] = new float[16];
+				pTexture.getTransformMatrix(matrix);
+				U1 = matrix[12];
+				V1 = matrix[5] + matrix[13];
+				U2 = matrix[0] + matrix[12];
+				V2 = matrix[13];
+			}
+			catch( RuntimeException e )
+			{
+				Log.e( "Video", "Failed to update video texture: " + e.toString() );
+			}
+		}
 	}
 
 	public void SetDimensions( int x, int y, int width, int height )
 	{
-		Log.i("Video", "Set Dimensions X:" + x + " Y:" + y + " Width:" + width + " Height:" + height);
+		Log.i("Video","Set Dimensions X:"+x+" Y:"+y+" Width:"+width+" Height:"+height);
 
 		m_x = x;
 		m_y = y;
 		m_width = width;
 		m_height = height;
 
-		if ( isDisplayed == 1 && pHolder != null )
+		if ( viewAdded == 1 && pHolder != null )
 		{
 			WindowManager wm = (WindowManager) act.getSystemService(Context.WINDOW_SERVICE);
 			WindowManager.LayoutParams layout = makeLayout(m_x,m_y,m_width,m_height);
@@ -657,7 +731,18 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 					}
 					String subfilename = m_filename.substring(index+1);
 					ZipResourceFile expansionFile = APKExpansionSupport.getAPKExpansionZipFile( act, AGKHelper.g_iExpansionVersion, AGKHelper.g_iExpansionVersion);
+					if ( expansionFile == null )
+					{
+						Log.e("Video","Failed to load expansion file");
+						return;
+					}
 					AssetFileDescriptor afd = expansionFile.getAssetFileDescriptor(subfilename);
+					if ( afd == null )
+					{
+						Log.e("Video","Failed to find video file in expansion file");
+						m_filename = "";
+						return;
+					}
 					newplayer.setDataSource(afd.getFileDescriptor(),afd.getStartOffset(), afd.getLength());
 					afd.close();
 					*/
@@ -676,7 +761,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 				if ( Build.VERSION.SDK_INT >= 14 ) newplayer.setSurface(new Surface(pTexture));
 				else
 				{
-					Log.e("Video","Playing video to texture is not supported on this device");
+					Log.e("Video", "Playing video to texture is not supported on this device");
 					AGKHelper.ShowMessage(act,"Playing video to texture is not supported on this device");
 				}
 			}
@@ -721,7 +806,7 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 	public void surfaceDestroyed(SurfaceHolder holder)
 	{
-		Log.i("Video", "surface destroyed");
+		Log.i("Video","surface destroyed");
 		pHolder = null;
 
 		if ( player != null )
@@ -742,6 +827,29 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 		Log.i("Video", "Surface changed");
 	}
 
+	@Override
+	public void onAttachedToWindow()
+	{
+		viewAdded = 1;
+		super.onAttachedToWindow();
+
+		if ( shouldRemoveView == 1 )
+		{
+			shouldRemoveView = 0;
+			WindowManager wm = (WindowManager) act.getSystemService(Context.WINDOW_SERVICE);
+			wm.removeView(this);
+			isDisplayed = 0;
+			viewAdded = 0;
+		}
+	}
+
+	@Override
+	public void onDetachedFromWindow()
+	{
+		shouldRemoveView = 0;
+		super.onDetachedFromWindow();
+	}
+
 	public void onCompletion(MediaPlayer mp)
 	{
 		Log.i("Video","Completed");
@@ -752,8 +860,12 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 	public void OnContextLost()
 	{
-		if ( pTexture != null )
-		{
+		synchronized( AGKHelper.videoLock ) {
+			if (pTexture != null) {
+				pTexture = null;
+			}
+			iLastTex = 0;
+
 			if (player != null) {
 				if (completed == 0) pausePos = player.getCurrentPosition();
 				else pausePos = -1;
@@ -761,17 +873,14 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 				player.release();
 				player = null;
 			}
-
-			pTexture = null;
 		}
-		iLastTex = 0;
 	}
 }
 
 class RunnableVideo implements Runnable
 {
 	public Activity act;
-	public static AGKSurfaceView video = null;
+	public static volatile AGKSurfaceView video = null;
 	public int action = 0;
 	
 	public String filename = "";
@@ -947,7 +1056,19 @@ class AGKSpeechListener  implements TextToSpeech.OnInitListener, TextToSpeech.On
 	@Override
 	public void onInit(int status)
 	{
-		if ( status == TextToSpeech.SUCCESS ) AGKHelper.g_iSpeechReady = 1;
+		if ( status == TextToSpeech.SUCCESS )
+		{
+			if ( Build.VERSION.SDK_INT >= 21 )
+			{
+				try {
+					if (AGKHelper.g_pTextToSpeech.getAvailableLanguages() != null) {
+						AGKHelper.g_SpeechLanguages = AGKHelper.g_pTextToSpeech.getAvailableLanguages().toArray();
+					}
+				}
+				catch( Exception e ) { Log.w("TextToSpeech", "Failed to get available languages"); }
+			}
+			AGKHelper.g_iSpeechReady = 1;
+		}
 		else AGKHelper.g_iSpeechReady = -1;
 	}
 
@@ -965,6 +1086,7 @@ class AGKSpeechListener  implements TextToSpeech.OnInitListener, TextToSpeech.On
 public class AGKHelper {
 	
 	public static Activity g_pAct = null;
+	public static String g_sLastURI = null;
 
 	// screen recording
 	static MediaProjectionManager mMediaProjectionManager = null;
@@ -992,7 +1114,14 @@ public class AGKHelper {
 	{
 		if ( Build.VERSION.SDK_INT >= 21 ) {
 			if (mMediaRecorder != null) {
-				mMediaRecorder.stop();
+				try
+				{
+					mMediaRecorder.stop();
+				}
+				catch( IllegalStateException e )
+				{
+					Log.w("ScreenRecorder", "Tried to stop media recorder in an illegal state");
+				}
 				mMediaRecorder.release();
 				mMediaRecorder = null;
 
@@ -1004,6 +1133,35 @@ public class AGKHelper {
 	public static int IsScreenRecording()
 	{
 		return mMediaRecorder == null ? 0 : 1;
+	}
+
+	public static void SetClipboardText( Activity act, String text )
+	{
+		Looper.prepare();
+
+		ClipboardManager clipboard = (ClipboardManager) act.getSystemService( Context.CLIPBOARD_SERVICE );
+		ClipData clip = ClipData.newPlainText( "Text", text );
+		clipboard.setPrimaryClip( clip );
+	}
+
+	public static String GetClipboardText( Activity act )
+	{
+		Looper.prepare();
+
+		ClipboardManager clipboard = (ClipboardManager) act.getSystemService(Context.CLIPBOARD_SERVICE);
+		String pasteData;
+
+		if (!(clipboard.hasPrimaryClip())) return "";
+		//if (!(clipboard.getPrimaryClipDescription().hasMimeType(MIMETYPE_TEXT_PLAIN))) return "";
+
+		ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
+		pasteData = item.getText().toString();
+		if (pasteData != null) return pasteData;
+
+		pasteData = item.coerceToText( act ).toString();
+		if (pasteData != null) return pasteData;
+
+		return "";
 	}
 
 	// window handling
@@ -1020,6 +1178,15 @@ public class AGKHelper {
 	public static void OnStart( Activity act )
 	{
 		g_pAct = act;
+
+		if (mMediaRecorder != null)
+		{
+			if (Build.VERSION.SDK_INT >= 24)
+			{
+				try { mMediaRecorder.resume(); }
+				catch( IllegalStateException e ) { Log.w("ScreenRecorder", "Tried to resume MediaRecorder from illegal state"); }
+			}
+		}
 	}
 	
 	public static void OnStop( Activity act )
@@ -1031,7 +1198,21 @@ public class AGKHelper {
 
 		if( deviceCamera != null ) deviceCamera.OnContextLost();
 
-		StopScreenRecording();
+		if (mMediaRecorder != null)
+		{
+			if (Build.VERSION.SDK_INT >= 24) mMediaRecorder.pause();
+			else StopScreenRecording();
+		}
+	}
+
+	public static String GetLastURIText()
+	{
+		return (g_sLastURI == null) ? "" : g_sLastURI;
+	}
+
+	public static void ClearLastURIText()
+	{
+		g_sLastURI = null;
 	}
 
 	public static int HasFirebase() { return 0; }
@@ -1072,7 +1253,7 @@ public class AGKHelper {
 	}
 	
 	// GameCenter
-	static int m_GameCenterLoggedIn = 0;
+	static int m_GameCenterLoggedIn = -1;
 	
 	public static int GetGameCenterExists( Activity act )
 	{
@@ -1088,6 +1269,8 @@ public class AGKHelper {
 	{
 		
 	}
+
+	public static void GameCenterLogout() {}
 	
 	public static int GetGameCenterLoggedIn()
 	{
@@ -1215,24 +1398,24 @@ public class AGKHelper {
 	
 	public static int GetDisplayWidth( Activity act )
 	{
-		//Display display = act.getWindowManager().getDefaultDisplay(); 
-		//return display.getWidth();
-		
-		DisplayMetrics displaymetrics = new DisplayMetrics();
-		act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
-		int screenWidth = displaymetrics.widthPixels;
-		return screenWidth;
+		//DisplayMetrics displaymetrics = new DisplayMetrics();
+		//act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
+		//int screenWidth = displaymetrics.widthPixels;
+		//return screenWidth;
+
+		// this works better when showing and hiding the navigation bar
+		return act.getWindow().getDecorView().getWidth();
 	}
 	
 	public static int GetDisplayHeight( Activity act )
 	{
-		//Display display = act.getWindowManager().getDefaultDisplay(); 
-		//return display.getHeight();
-		
-		DisplayMetrics displaymetrics = new DisplayMetrics();
-		act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
-		int screenHeight = displaymetrics.heightPixels;
-		return screenHeight;
+		//DisplayMetrics displaymetrics = new DisplayMetrics();
+		//act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
+		//int screenHeight = displaymetrics.heightPixels;
+		//return screenHeight;
+
+		// this works better when showing and hiding the navigation bar
+		return act.getWindow().getDecorView().getHeight();
 	}
 	
 	// Edit box input
@@ -1262,31 +1445,43 @@ public class AGKHelper {
 			return "";
 		}
 	}
-	
+
 	public static void SetInputText( Activity act, String text, int cursorpos )
 	{
 		//if ( mTextInput == null ) return;
-		
+		/*
 		RunnableKeyboard run = new RunnableKeyboard();
 		run.act = act;
 		run.action = 3;
 		run.text = text;
 		run.cursorpos = cursorpos;
-		act.runOnUiThread( run );
+		act.runOnUiThread( run );*/
+
+		if ( AGKHelper.mTextInput != null )
+		{
+			AGKHelper.mTextInput.setText(text);
+			if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+		}
 	}
 
 	public static void SetInputTextCursor( Activity act, int cursorpos )
 	{
 		//if ( mTextInput == null ) return;
-
+		/*
 		RunnableKeyboard run = new RunnableKeyboard();
 		run.act = act;
 		run.action = 5;
 		run.cursorpos = cursorpos;
 		act.runOnUiThread( run );
+		*/
+
+		if ( AGKHelper.mTextInput != null )
+		{
+			if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+		}
 	}
-	
-	public static void ShowKeyboard( Activity act, int multiline )
+
+	public static void ShowKeyboard( Activity act, int multiline, int inputType )
 	{
 		//InputMethodManager lInputMethodManager = (InputMethodManager)act.getSystemService(Context.INPUT_METHOD_SERVICE);
 		//lInputMethodManager.showSoftInput( act.getWindow().getDecorView(), 0 );
@@ -1298,6 +1493,8 @@ public class AGKHelper {
 			RunnableKeyboard run = new RunnableKeyboard();
 			run.act = act;
 			run.action = 4;
+			run.multiline = multiline;
+			run.inputType = inputType;
 			run.cursorpos = -1;
 			act.runOnUiThread( run );
 			return;
@@ -1309,6 +1506,7 @@ public class AGKHelper {
 		run.act = act;
 		run.action = 1;
 		run.multiline = multiline;
+		run.inputType = inputType;
 		run.cursorpos = -1;
 		act.runOnUiThread( run );
 	}
@@ -1356,12 +1554,12 @@ public class AGKHelper {
 	
 	public static int hasStartedVideo = 0;
 	public static int videoLoaded = 0;
-	public static Object videoLock = new Object(); 
+	public static final Object videoLock = new Object(); 
 	public static float g_fVideoVolume = 100; 
 	
 	public static void LoadVideo( Activity act, String filename, int type )
 	{
-		Log.w("Video","Load Video");
+		Log.i("Video","Load Video");
 		RunnableVideo video = new RunnableVideo();
 		video.act = act;
 		video.action = 1;
@@ -1373,7 +1571,7 @@ public class AGKHelper {
 	
 	public static void SetVideoDimensions( Activity act, int x, int y, int width, int height )
 	{
-		Log.w("Video","Set Dimensions");
+		Log.i("Video","Set Dimensions");
 		RunnableVideo video = new RunnableVideo();
 		video.act = act;
 		video.action = 2;
@@ -1451,6 +1649,7 @@ public class AGKHelper {
 	public static float GetVideoValue( Activity act, int value )
 	{
 		if ( RunnableVideo.video == null ) return videoLoaded==1 ? 0 : -1;
+		if ( RunnableVideo.video.m_filename == null ) return videoLoaded==1 ? 0 : -1;
 		if ( RunnableVideo.video.m_filename.equals("Error") ) return -1;
 		if ( RunnableVideo.video.m_filename.equals("") ) return videoLoaded==1 ? 0 : -1;
 		
@@ -1460,6 +1659,7 @@ public class AGKHelper {
 			{
 				synchronized( videoLock ) 
 				{
+					if ( RunnableVideo.video == null ) return 0;
 					if ( RunnableVideo.video.player == null ) return 0;
 					return RunnableVideo.video.player.getCurrentPosition()/1000.0f;
 				}
@@ -1472,15 +1672,36 @@ public class AGKHelper {
 		return 0;
 	}
 	
+	public static float GetVideoTextureValue( Activity act, int value )
+	{
+		if ( RunnableVideo.video == null ) return 0;
+		if ( RunnableVideo.video.m_filename.equals("Error") ) return 0;
+		if ( RunnableVideo.video.m_filename.equals("") ) return 0;
+
+		switch(value)
+		{
+			case 1: return RunnableVideo.video.U1;
+			case 2: return RunnableVideo.video.V1;
+			case 3: return RunnableVideo.video.U2;
+			case 4: return RunnableVideo.video.V2;
+		}
+
+		return 0;
+	}
+
 	public static void SetVideoVolume( float volume )
 	{
 		g_fVideoVolume = volume;
 		if ( g_fVideoVolume > 99 ) g_fVideoVolume = 99;
 		if ( g_fVideoVolume < 0 ) g_fVideoVolume = 0;
-		if ( RunnableVideo.video == null || RunnableVideo.video.player == null ) return;
 		
-		float log1=(float)(Math.log(100-g_fVideoVolume)/Math.log(100));
-		RunnableVideo.video.player.setVolume( 1-log1, 1-log1 );
+		synchronized( videoLock )
+		{
+			if ( RunnableVideo.video == null || RunnableVideo.video.player == null ) return;
+		
+			float log1=(float)(Math.log(100-g_fVideoVolume)/Math.log(100));
+			RunnableVideo.video.player.setVolume( 1-log1, 1-log1 );
+		}
 	}
 
 	public static void SetVideoPosition( Activity act, float position )
@@ -1490,6 +1711,12 @@ public class AGKHelper {
 		video.pos = position;
 		video.action = 9;
 		act.runOnUiThread(video);
+	}
+
+	// youtube
+	static void PlayYoutubeVideo( Activity act, String key, String video, int time )
+	{
+
 	}
 
 	// camera to image
@@ -1556,6 +1783,7 @@ public class AGKHelper {
 	public static int g_iSpeechReady = 0;
 	public static int g_iIsSpeaking = 0;
 	public static int g_iSpeechIDLast = 0;
+	static Object[] g_SpeechLanguages = null;
 
 	public static void TextToSpeechSetup( Activity act )
 	{
@@ -1564,6 +1792,14 @@ public class AGKHelper {
 		g_pSpeechListener = new AGKSpeechListener();
 		g_pTextToSpeech = new TextToSpeech( act, g_pSpeechListener );
 		g_pTextToSpeech.setOnUtteranceCompletedListener(g_pSpeechListener);
+
+		List<TextToSpeech.EngineInfo> engines = g_pTextToSpeech.getEngines();
+		for ( TextToSpeech.EngineInfo engine: engines )
+		{
+			Log.i( "TextToSpeech", "Engine: " + engine.name );
+		}
+
+		Log.i( "TextToSpeech", "Default Engine: " + g_pTextToSpeech.getDefaultEngine() );
 	}
 
 	public static int GetTextToSpeechReady()
@@ -1604,35 +1840,34 @@ public class AGKHelper {
 		HashMap<String,String> hashMap = new HashMap();
 		hashMap.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, Integer.toString(g_iSpeechIDLast) );
 
-		g_pTextToSpeech.speak( text, queueMode, hashMap );
+		if ( g_pTextToSpeech.speak( text, queueMode, hashMap ) < 0 )
+		{
+			Log.e( "TextToSpeech", "Failed to queue speech" );
+		}
 	}
 
 	public static int GetSpeechNumVoices( Activity act )
 	{
-		if ( g_pTextToSpeech == null ) return 0;
-		if ( Build.VERSION.SDK_INT < 21 ) return 0;
-
-		return g_pTextToSpeech.getVoices().size();
+		if ( g_SpeechLanguages == null ) return 0;
+		return g_SpeechLanguages.length;
 	}
 
 	public static String GetSpeechVoiceLanguage( Activity act, int index )
 	{
-		if ( g_pTextToSpeech == null ) return "";
-		if ( Build.VERSION.SDK_INT < 21 ) return "";
-		if ( index < 0 || index >= g_pTextToSpeech.getVoices().size() ) return "";
+		if ( g_SpeechLanguages == null ) return "";
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return "";
 
-		Voice voice = (Voice) g_pTextToSpeech.getVoices().toArray()[ index ];
-		return voice.getLocale().toString();
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		return locale.toString();
 	}
 
 	public static String GetSpeechVoiceName( Activity act, int index )
 	{
-		if ( g_pTextToSpeech == null ) return "";
-		if ( Build.VERSION.SDK_INT < 21 ) return "";
-		if ( index < 0 || index >= g_pTextToSpeech.getVoices().size() ) return "";
+		if ( g_SpeechLanguages == null ) return "";
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return "";
 
-		Voice voice = (Voice) g_pTextToSpeech.getVoices().toArray()[ index ];
-		return voice.getName();
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		return locale.getDisplayName();
 	}
 
 	public static void SetSpeechLanguage( Activity act, String lang )
@@ -1641,6 +1876,25 @@ public class AGKHelper {
 		String[] parts = lang.split("_");
 		if ( parts.length <= 1 ) g_pTextToSpeech.setLanguage( new Locale(lang) );
 		else g_pTextToSpeech.setLanguage( new Locale(parts[0],parts[1]) );
+	}
+
+	public static void SetSpeechLanguageByID( Activity act, String sID )
+	{
+		if ( g_SpeechLanguages == null ) return;
+
+		int index = 0;
+		try {
+			index = Integer.parseInt(sID);
+		}
+		catch( NumberFormatException e )
+		{
+			Log.e( "SetSpeechLanguageByID", "Invalid language ID: " + sID );
+			return;
+		}
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return;
+
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		g_pTextToSpeech.setLanguage( locale );
 	}
 
 	public static void SetSpeechRate( Activity act, float rate )
@@ -1672,6 +1926,11 @@ public class AGKHelper {
 
 	// adverts
 	public static void SetAdMobTestMode( int mode ) {}
+	public static void LoadAdMobConsentStatus( Activity act, String publisherID, String privacyPolicy ) {}
+	public static int GetAdMobConsentStatus( Activity act ) { return 0; }
+	public static void RequestAdMobConsent( Activity act ) {}
+	public static void OverrideAdMobConsent( Activity act, int mode ) {}
+	public static void OverrideChartboostConsent( Activity act, int mode ) {}
 	public static void CreateAd(Activity act, String publisherID, int horz, int vert, int offsetX, int offsetY, int type) {}
 	public static void CacheFullscreenAd(Activity act, String publisherID) {}
 	public static void CreateFullscreenAd(Activity act, String publisherID) {}
@@ -1704,6 +1963,11 @@ public class AGKHelper {
 		return 0;
 	}
 
+	public static void SetOrientation( Activity act, int orien )
+	{
+		act.setRequestedOrientation( orien );
+	}
+
 	// local notifications
 	public static void SetNotification( Activity act, int id, int unixtime, String message )
 	{
@@ -1715,20 +1979,27 @@ public class AGKHelper {
 
 	}
 	
-	public static void SetOrientation( Activity act, int orien )
-	{
-		act.setRequestedOrientation( orien );
-	}
-	
 	public static int GetOrientation( Activity act )
 	{
 		return act.getWindowManager().getDefaultDisplay().getRotation();
 	}
-	
+
 	public static String GetDeviceID(Activity nativeactivityptr)
 	{
 		// This ID will remain constant for this device until a factory reset is performed
-		String uuid = Secure.getString(nativeactivityptr.getContentResolver(), Secure.ANDROID_ID);		
+		String uuid = Secure.getString(nativeactivityptr.getContentResolver(), Secure.ANDROID_ID);
+		if ( uuid == null || uuid.equals("") )
+		{
+			SharedPreferences sharedPrefs = nativeactivityptr.getSharedPreferences( "PREF_UNIQUE_ID", Context.MODE_PRIVATE);
+			uuid = sharedPrefs.getString( "PREF_UNIQUE_ID", null);
+
+			if (uuid == null || uuid.equals("")) {
+				uuid = UUID.randomUUID().toString();
+				SharedPreferences.Editor editor = sharedPrefs.edit();
+				editor.putString("PREF_UNIQUE_ID", uuid);
+				editor.commit();
+			}
+		}
 		return uuid;
 	}
 
@@ -2079,6 +2350,11 @@ public class AGKHelper {
 		return "";
 	}
 	
+	public static String iapGetSignature( int ID )
+	{
+		return "";
+	}
+
 	// ******************
 	// Push Notifications
 	// ******************
@@ -2090,7 +2366,7 @@ public class AGKHelper {
 	
 	public static int registerPushNotification( Activity nativeactivityptr )
 	{
-		ShowMessage(nativeactivityptr,"Invalid command called, Push Notifcations are not enabled with the lite player");
+		ShowMessage(nativeactivityptr,"Push notifications are not supported with Ouya devices");
 		return 0;
 	}
 	
@@ -2115,47 +2391,45 @@ public class AGKHelper {
 		final String applicationName = (String) (ai != null ? pm.getApplicationLabel(ai) : "unknown");
 		return applicationName;
 	}
-	
-	// image chooser code
-	//private static MyJavaActivity myActivity = null;
-	//private static MyJavaActivity imageActivity = null;
-    private static String storeimagepath = null;
-	public static void StoreImagePath(String path) { storeimagepath=path; }
-	
-	// Function to launch Choose Image intent
-	public static String StartChooseImage(Activity nativeactivityptr)
-	{
-		// Ensure we can create a new activity in this static function
-		Looper.prepare();
-		
-		// Create new intent and launch it (choose image)
-		Intent myIntent = new Intent(nativeactivityptr, MyJavaActivity.class);
-		nativeactivityptr.startActivity(myIntent);
-		
-		// return immediately - fun string return (can be replaced with boolean/int)
-		return "success";
-    }
-	
-	// Retrieve image path string when we return to main NativeActivity
-	public static String GetChosenImagePath()
-	{
-		if ( storeimagepath == null ) return "";
 
-		String result = storeimagepath;
-		storeimagepath = null;
-		return result;
-    }
-	
-	// camera
-	public static void CaptureImage(Activity nativeactivityptr)
+	// image chooser code
+	public static int iChoosingImage = 0;
+	public static String sChosenImagePath = "";
+
+	// Function to launch Choose Image intent
+	public static void StartChooseImage(Activity act, String path)
 	{
+		if ( iChoosingImage == 1 ) return;
+		sChosenImagePath = path;
+
 		// Ensure we can create a new activity in this static function
 		Looper.prepare();
-				
+
+		iChoosingImage = 1;
+		Intent photoPickerIntent = new Intent(Intent.ACTION_GET_CONTENT);
+		photoPickerIntent.setType("image/*");
+		act.startActivityForResult(photoPickerIntent, 9005);
+	}
+
+	public static int ChooseImageResult() { return iChoosingImage; }
+
+	// camera
+	public static int iCapturingImage = 0; // 0=no image, 1=capturing, 2=got image
+	public static String sCameraSavePath = "";
+	public static void CaptureImage(Activity nativeactivityptr, String path)
+	{
+		if ( iCapturingImage == 1 ) return;
+		sCameraSavePath = path;
+
+		// Ensure we can create a new activity in this static function
+		Looper.prepare();
+
+		iCapturingImage = 1;
 		Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-		cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, Uri.parse("file:///sdcard/capturedimage.jpg"));
-		nativeactivityptr.startActivity(cameraIntent);    
-    }
+		nativeactivityptr.startActivityForResult( cameraIntent, 9004 );
+	}
+
+	public static int CaptureImageResult() { return iCapturingImage; }
 	
 	public static String GetLanguage()
 	{
@@ -2314,6 +2588,8 @@ public class AGKHelper {
 	{
 		return 0;
 	}
+
+	public static int GetExpansionError(Activity act) { return 0; }
 	
 	public static void DownloadExpansion(Activity act)
 	{
@@ -2324,6 +2600,10 @@ public class AGKHelper {
 	{
 		return 0;
 	}
+
+	public static int GetExpansionFileExists(Activity act, String filename) { return 0; }
+
+	public static int ExtractExpansionFileImage(Activity act, String filename, String newPath ) { return 0; }
 
 	// permissions
 	static String[] g_sPermissions = { "WriteExternal", "Location", "Camera", "RecordAudio" };
@@ -2541,7 +2821,6 @@ public class AGKHelper {
 			input.read(bytes, 0, length);
 			input.close();
 			result = new String( bytes, "UTF-8" );
-			Log.w("Shared Data","Name: " + varName + " Value: " + result);
 		}
 		catch( FileNotFoundException e ) { return defaultValue; }
 		catch( IOException e )
@@ -2657,7 +2936,7 @@ public class AGKHelper {
 		target.putExtra( Intent.EXTRA_TEXT, sText );
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share Text"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share text");
 		}
@@ -2694,11 +2973,12 @@ public class AGKHelper {
 
 		Intent target = new Intent( Intent.ACTION_SEND );
 		target.setType( "image/*" );
-		target.putExtra(Intent.EXTRA_TITLE, "Share Image");
-		target.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(dst));
+		target.putExtra( Intent.EXTRA_TITLE, "Share Image" );
+		target.putExtra( Intent.EXTRA_STREAM, Uri.fromFile(dst) );
+		target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share Image"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share images");
 		}
@@ -2738,11 +3018,60 @@ public class AGKHelper {
 		target.putExtra(Intent.EXTRA_TITLE, "Share Image And Text");
 		target.putExtra( Intent.EXTRA_STREAM, Uri.fromFile(dst) );
 		target.putExtra( Intent.EXTRA_TEXT, sText );
+		target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share images");
+		}
+	}
+
+	public static void ShareFile( Activity act, String sPath )
+	{
+		int pos = sPath.lastIndexOf('/');
+		String sFileName;
+		if ( pos >= 0 ) sFileName = sPath.substring(pos+1);
+		else sFileName = sPath;
+
+		// get extension
+		pos = sPath.lastIndexOf('.');
+		String sExt = "";
+		if ( pos >= 0 ) sExt = sPath.substring(pos+1);
+
+		File DownloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+		File dst = new File( DownloadFolder, sFileName );
+
+		File src = new File(sPath);
+
+		//copy to external storage
+		try {
+			InputStream in = new FileInputStream(src);
+			OutputStream out = new FileOutputStream(dst);
+
+			// Transfer bytes from in to out
+			byte[] buf = new byte[1024];
+			int len;
+			while ((len = in.read(buf)) > 0) {
+				out.write(buf, 0, len);
+			}
+			in.close();
+			out.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		String sMIME = MimeTypeMap.getSingleton().getMimeTypeFromExtension(sExt);
+
+		Intent target = new Intent( Intent.ACTION_SEND );
+		target.setType( sMIME );
+		target.putExtra( Intent.EXTRA_STREAM, Uri.fromFile(dst) );
+		target.setFlags( Intent.FLAG_ACTIVITY_NO_HISTORY );
+
+		try {
+			act.startActivity(Intent.createChooser(target,"Share File"));
+		} catch (ActivityNotFoundException e) {
+			ShowMessage(act,"No application found for sharing file type \"" + sExt + "\"");
 		}
 	}
 

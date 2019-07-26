@@ -1,8 +1,12 @@
 // Common Includes
-#import "core.h"
+#import "Core.h"
 #import "EAGLView.h"
 
 #include "MediaPlayer/MediaPlayer.h"
+#import <UserNotifications/UNNotificationResponse.h>
+#import <UserNotifications/UNNotification.h>
+#import <UserNotifications/UNNotificationRequest.h>
+#import <UserNotifications/UNNotificationContent.h>
 
 using namespace AGK;
 @implementation iphone_appAppDelegate
@@ -36,9 +40,46 @@ using namespace AGK;
 		return YES;
 	}
 	[viewController setActive];
+    
+    NSDictionary *remoteNotify = launchOptions[UIApplicationLaunchOptionsRemoteNotificationKey];
+    if ( remoteNotify )
+    {
+        NSDictionary *aps = [remoteNotify objectForKey:@"aps"];
+        if ( aps )
+        {
+            NSString *deeplink = [aps objectForKey:@"deeplink"];
+            if ( deeplink ) agk::HandleDeepLink( [deeplink UTF8String] );
+        }
+    }
+    
+    // Add to manage notification-related behaviors on iOS 10
+    [UNUserNotificationCenter currentNotificationCenter].delegate = self;
 	
 	// success
     return YES;
+}
+
+//Called when a notification is delivered to a foreground app.
+-(void)userNotificationCenter:(UNUserNotificationCenter *)center willPresentNotification:(UNNotification *)notification withCompletionHandler:(void (^)(UNNotificationPresentationOptions options))completionHandler
+{
+    //NSLog(@"User Info : %@",notification.request.content.userInfo);
+    completionHandler(UNAuthorizationOptionSound | UNAuthorizationOptionAlert | UNAuthorizationOptionBadge);
+}
+
+//Called to let your app know which action was selected by the user for a given notification.
+-(void)userNotificationCenter:(UNUserNotificationCenter *)center didReceiveNotificationResponse:(UNNotificationResponse *)response withCompletionHandler:(void(^)())completionHandler
+{
+    //NSLog(@"User Info : %@",response.notification.request.content.userInfo);
+    
+    // get the whole string from the notification
+    NSDictionary *aps = [response.notification.request.content.userInfo objectForKey:@"aps"];
+    if ( aps )
+    {
+        NSString *deeplink = [aps objectForKey:@"deeplink"];
+        if ( deeplink ) agk::HandleDeepLink( [deeplink UTF8String] );
+    }
+    
+    completionHandler();
 }
 
 - (NSUInteger)application:(UIApplication *)application supportedInterfaceOrientationsForWindow:(UIWindow *)window 
@@ -85,6 +126,7 @@ using namespace AGK;
     [viewController setAppActive:0];
     [viewController setInactive];
     agk::AppPausing();
+    glFinish();
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
@@ -153,6 +195,11 @@ using namespace AGK;
     return agk::FacebookHandleOpenURL(url) > 0;
 }
 
+- ( BOOL ) application: ( UIApplication* ) application continueUserActivity:(NSUserActivity*) userActivity restorationHandler:(void (^)(NSArray<id<UIUserActivityRestoring>> *restorableObjects)) restorationHandler
+{
+    return agk::FacebookHandleOpenURL(userActivity.webpageURL) > 0;
+}
+
 - ( void ) application: ( UIApplication* ) application didReceiveLocalNotification: ( UILocalNotification* ) notification 
 {
     // called when the app receives a local notification
@@ -201,3 +248,8 @@ using namespace AGK;
  @implementation FIRApp : NSObject @end
  @implementation FIRAnalytics : NSObject @end
  */
+
+#if defined(__i386__) || defined(__x86_64__)
+@implementation PACConsentForm : NSObject @end
+@implementation PACConsentInformation : NSObject @end
+#endif

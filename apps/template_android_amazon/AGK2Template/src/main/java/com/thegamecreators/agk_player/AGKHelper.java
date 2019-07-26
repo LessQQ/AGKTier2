@@ -23,8 +23,12 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.AlertDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.IntentSender;
 
@@ -54,6 +58,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 
 import android.content.SharedPreferences;
 import android.graphics.SurfaceTexture;
@@ -69,7 +74,9 @@ import android.os.Vibrator;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.content.FileProvider;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.text.format.Formatter;
 import android.util.DisplayMetrics;
@@ -121,6 +128,8 @@ import android.media.MediaMetadataRetriever;
 import com.google.ads.consent.*;
 
 import com.mycompany.mytemplate.R;
+
+import static android.content.ClipDescription.MIMETYPE_TEXT_PLAIN;
 
 // Used for agk::Message()
 class RunnableMessage implements Runnable
@@ -176,6 +185,7 @@ class RunnableKeyboard implements Runnable
 	public int action = 0;
 	public String text = "";
 	public int multiline = 0;
+	public int inputType = 0; //0=normal, 1=numbers
 	public int cursorpos = 0;
 	
 	public void run() {
@@ -185,6 +195,8 @@ class RunnableKeyboard implements Runnable
 			{
 				AGKHelper.mTextInput = new EditText(act);
 				AGKHelper.mTextInput.setSingleLine(multiline == 0);
+				if ( inputType==1 ) AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED );
+				else AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_TEXT );
 				if ( MyTextWatcher.m_TextWatcher == null ) MyTextWatcher.m_TextWatcher = new MyTextWatcher();
 				if ( MyTextActionWatcher.m_TextActionWatcher == null ) MyTextActionWatcher.m_TextActionWatcher = new MyTextActionWatcher();
 				MyTextActionWatcher.act = act;
@@ -234,6 +246,9 @@ class RunnableKeyboard implements Runnable
 			{
 				if ( AGKHelper.mTextInput != null ) 
 				{
+					AGKHelper.mTextInput.setSingleLine(multiline == 0);
+					if ( inputType==1 ) AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED );
+					else AGKHelper.mTextInput.setInputType( InputType.TYPE_CLASS_TEXT );
 					AGKHelper.mTextFinished = false;
 					if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
 					AGKHelper.mTextInput.requestFocus();
@@ -246,7 +261,16 @@ class RunnableKeyboard implements Runnable
 			{
 				if ( AGKHelper.mTextInput != null )
 				{
-					if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+					if ( cursorpos >= 0 )
+					{
+						try {
+							AGKHelper.mTextInput.setSelection(cursorpos);
+						}
+						catch( IndexOutOfBoundsException e )
+						{
+							Log.w("Keyboard", "SetCursor index out of bounds: " + cursorpos);
+						}
+					}
 				}
 				break;
 			}
@@ -1089,6 +1113,10 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 
 		m_filename = filename;
 		m_filetype = type;
+		U1 = 0;
+		V1 = 0;
+		U2 = 1;
+		V2 = 1;
 
 		if ( player != null )
 		{
@@ -1405,14 +1433,20 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 			if (pTexture == null) return;
 			if (Build.VERSION.SDK_INT < 14) return;
 
-			pTexture.updateTexImage();
-
-			float matrix[] = new float[16];
-			pTexture.getTransformMatrix(matrix);
-			U1 = matrix[12];
-			V1 = matrix[5] + matrix[13];
-			U2 = matrix[0] + matrix[12];
-			V2 = matrix[13];
+			try
+			{
+				pTexture.updateTexImage();
+				float matrix[] = new float[16];
+				pTexture.getTransformMatrix(matrix);
+				U1 = matrix[12];
+				V1 = matrix[5] + matrix[13];
+				U2 = matrix[0] + matrix[12];
+				V2 = matrix[13];
+			}
+			catch( RuntimeException e )
+			{
+				Log.e( "Video", "Failed to update video texture: " + e.toString() );
+			}
 		}
 	}
 
@@ -1618,11 +1652,12 @@ class AGKSurfaceView extends SurfaceView implements SurfaceHolder.Callback, Medi
 class RunnableVideo implements Runnable
 {
 	public Activity act;
-	public static AGKSurfaceView video = null;
+	public static volatile AGKSurfaceView video = null;
 	public int action = 0;
 	
 	public String filename = "";
 	public int fileType = 0;
+	public SurfaceHolder pHolder = null;
 	public int m_x,m_y,m_width,m_height;
 	public int tex = 0;
 	public float pos = 0;
@@ -1827,7 +1862,19 @@ class AGKSpeechListener  implements TextToSpeech.OnInitListener, TextToSpeech.On
 	@Override
 	public void onInit(int status)
 	{
-		if ( status == TextToSpeech.SUCCESS ) AGKHelper.g_iSpeechReady = 1;
+		if ( status == TextToSpeech.SUCCESS )
+		{
+			if ( Build.VERSION.SDK_INT >= 21 )
+			{
+				try {
+					if (AGKHelper.g_pTextToSpeech.getAvailableLanguages() != null) {
+						AGKHelper.g_SpeechLanguages = AGKHelper.g_pTextToSpeech.getAvailableLanguages().toArray();
+					}
+				}
+				catch( Exception e ) { Log.w("TextToSpeech", "Failed to get available languages"); }
+			}
+			AGKHelper.g_iSpeechReady = 1;
+		}
 		else AGKHelper.g_iSpeechReady = -1;
 	}
 
@@ -1843,6 +1890,8 @@ class AGKSpeechListener  implements TextToSpeech.OnInitListener, TextToSpeech.On
 
 // Entry point for all AGK Helper calls
 public class AGKHelper {
+
+	public static String g_sLastURI = null;
 
 	static int m_iGameCenterUsed = 0;
 	static int m_iGameCenterLoggedIn = 0;
@@ -1896,7 +1945,14 @@ public class AGKHelper {
 	{
 		if ( Build.VERSION.SDK_INT >= 21 ) {
 			if (mMediaRecorder != null) {
-				mMediaRecorder.stop();
+				try
+				{
+					mMediaRecorder.stop();
+				}
+				catch( IllegalStateException e )
+				{
+					Log.w("ScreenRecorder", "Tried to stop media recorder in an illegal state");
+				}
 				mMediaRecorder.release();
 				mMediaRecorder = null;
 
@@ -1908,6 +1964,35 @@ public class AGKHelper {
 	public static int IsScreenRecording()
 	{
 		return mMediaRecorder == null ? 0 : 1;
+	}
+
+	public static void SetClipboardText( Activity act, String text )
+	{
+		Looper.prepare();
+
+		ClipboardManager clipboard = (ClipboardManager) act.getSystemService( Context.CLIPBOARD_SERVICE );
+		ClipData clip = ClipData.newPlainText( "Text", text );
+		clipboard.setPrimaryClip( clip );
+	}
+
+	public static String GetClipboardText( Activity act )
+	{
+		Looper.prepare();
+
+		ClipboardManager clipboard = (ClipboardManager) act.getSystemService(Context.CLIPBOARD_SERVICE);
+		String pasteData;
+
+		if (!(clipboard.hasPrimaryClip())) return "";
+		//if (!(clipboard.getPrimaryClipDescription().hasMimeType(MIMETYPE_TEXT_PLAIN))) return "";
+
+		ClipData.Item item = clipboard.getPrimaryClip().getItemAt(0);
+		pasteData = item.getText().toString();
+		if (pasteData != null) return pasteData;
+
+		pasteData = item.coerceToText( act ).toString();
+		if (pasteData != null) return pasteData;
+
+		return "";
 	}
 
 	// window handling
@@ -1923,6 +2008,7 @@ public class AGKHelper {
 		
 	public static void OnStart( Activity act )
 	{
+		g_pAct = act;
 		isVisible = 1;
 
 		// resume ad
@@ -1936,6 +2022,15 @@ public class AGKHelper {
 		if ( g_iIAPStatus == 2 )
 		{
 			PurchasingService.getPurchaseUpdates(false);
+		}
+
+		if (mMediaRecorder != null)
+		{
+			if (Build.VERSION.SDK_INT >= 24)
+			{
+				try { mMediaRecorder.resume(); }
+				catch( IllegalStateException e ) { Log.w("ScreenRecorder", "Tried to resume MediaRecorder from illegal state"); }
+			}
 		}
 	}
 	
@@ -1958,7 +2053,21 @@ public class AGKHelper {
 
 		if( deviceCamera != null ) deviceCamera.OnContextLost();
 
-		StopScreenRecording();
+		if (mMediaRecorder != null)
+		{
+			if (Build.VERSION.SDK_INT >= 24) mMediaRecorder.pause();
+			else StopScreenRecording();
+		}
+	}
+
+	public static String GetLastURIText()
+	{
+		return (g_sLastURI == null) ? "" : g_sLastURI;
+	}
+
+	public static void ClearLastURIText()
+	{
+		g_sLastURI = null;
 	}
 
 	public static int HasFirebase() { return 0; }
@@ -2019,6 +2128,8 @@ public class AGKHelper {
 		AmazonGamesClient.initialize(act, agsCallback, myGameFeatures);
 		m_iGameCenterUsed = 1;
 	}
+
+	public static void GameCenterLogout() {}
 	
 	public static int GetGameCenterLoggedIn()
 	{
@@ -2165,24 +2276,24 @@ public class AGKHelper {
 	
 	public static int GetDisplayWidth( Activity act )
 	{
-		//Display display = act.getWindowManager().getDefaultDisplay(); 
-		//return display.getWidth();
-		
-		DisplayMetrics displaymetrics = new DisplayMetrics();
-		act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
-		int screenWidth = displaymetrics.widthPixels;
-		return screenWidth;
+		//DisplayMetrics displaymetrics = new DisplayMetrics();
+		//act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
+		//int screenWidth = displaymetrics.widthPixels;
+		//return screenWidth;
+
+		// this works better when showing and hiding the navigation bar
+		return act.getWindow().getDecorView().getWidth();
 	}
 	
 	public static int GetDisplayHeight( Activity act )
 	{
-		//Display display = act.getWindowManager().getDefaultDisplay(); 
-		//return display.getHeight();
-		
-		DisplayMetrics displaymetrics = new DisplayMetrics();
-		act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
-		int screenHeight = displaymetrics.heightPixels;
-		return screenHeight;
+		//DisplayMetrics displaymetrics = new DisplayMetrics();
+		//act.getWindowManager().getDefaultDisplay().getMetrics(displaymetrics);
+		//int screenHeight = displaymetrics.heightPixels;
+		//return screenHeight;
+
+		// this works better when showing and hiding the navigation bar
+		return act.getWindow().getDecorView().getHeight();
 	}
 	
 	// Edit box input
@@ -2212,31 +2323,43 @@ public class AGKHelper {
 			return "";
 		}
 	}
-	
+
 	public static void SetInputText( Activity act, String text, int cursorpos )
 	{
 		//if ( mTextInput == null ) return;
-		
+		/*
 		RunnableKeyboard run = new RunnableKeyboard();
 		run.act = act;
 		run.action = 3;
 		run.text = text;
 		run.cursorpos = cursorpos;
-		act.runOnUiThread( run );
+		act.runOnUiThread( run );*/
+
+		if ( AGKHelper.mTextInput != null )
+		{
+			AGKHelper.mTextInput.setText(text);
+			if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+		}
 	}
 
 	public static void SetInputTextCursor( Activity act, int cursorpos )
 	{
 		//if ( mTextInput == null ) return;
-
+		/*
 		RunnableKeyboard run = new RunnableKeyboard();
 		run.act = act;
 		run.action = 5;
 		run.cursorpos = cursorpos;
 		act.runOnUiThread( run );
+		*/
+
+		if ( AGKHelper.mTextInput != null )
+		{
+			if ( cursorpos >= 0 ) AGKHelper.mTextInput.setSelection(cursorpos);
+		}
 	}
-	
-	public static void ShowKeyboard( Activity act, int multiline )
+
+	public static void ShowKeyboard( Activity act, int multiline, int inputType )
 	{
 		//InputMethodManager lInputMethodManager = (InputMethodManager)act.getSystemService(Context.INPUT_METHOD_SERVICE);
 		//lInputMethodManager.showSoftInput( act.getWindow().getDecorView(), 0 );
@@ -2248,6 +2371,8 @@ public class AGKHelper {
 			RunnableKeyboard run = new RunnableKeyboard();
 			run.act = act;
 			run.action = 4;
+			run.multiline = multiline;
+			run.inputType = inputType;
 			run.cursorpos = -1;
 			act.runOnUiThread( run );
 			return;
@@ -2259,6 +2384,7 @@ public class AGKHelper {
 		run.act = act;
 		run.action = 1;
 		run.multiline = multiline;
+		run.inputType = inputType;
 		run.cursorpos = -1;
 		act.runOnUiThread( run );
 	}
@@ -2401,6 +2527,7 @@ public class AGKHelper {
 	public static float GetVideoValue( Activity act, int value )
 	{
 		if ( RunnableVideo.video == null ) return videoLoaded==1 ? 0 : -1;
+		if ( RunnableVideo.video.m_filename == null ) return videoLoaded==1 ? 0 : -1;
 		if ( RunnableVideo.video.m_filename.equals("Error") ) return -1;
 		if ( RunnableVideo.video.m_filename.equals("") ) return videoLoaded==1 ? 0 : -1;
 		
@@ -2410,6 +2537,7 @@ public class AGKHelper {
 			{
 				synchronized( videoLock ) 
 				{
+					if ( RunnableVideo.video == null ) return 0;
 					if ( RunnableVideo.video.player == null ) return 0;
 					return RunnableVideo.video.player.getCurrentPosition()/1000.0f;
 				}
@@ -2444,10 +2572,14 @@ public class AGKHelper {
 		g_fVideoVolume = volume;
 		if ( g_fVideoVolume > 99 ) g_fVideoVolume = 99;
 		if ( g_fVideoVolume < 0 ) g_fVideoVolume = 0;
-		if ( RunnableVideo.video == null || RunnableVideo.video.player == null ) return;
-		
-		float log1=(float)(Math.log(100-g_fVideoVolume)/Math.log(100));
-		RunnableVideo.video.player.setVolume( 1-log1, 1-log1 );
+
+		synchronized( videoLock )
+		{
+			if (RunnableVideo.video == null || RunnableVideo.video.player == null) return;
+
+			float log1 = (float) (Math.log(100 - g_fVideoVolume) / Math.log(100));
+			RunnableVideo.video.player.setVolume(1 - log1, 1 - log1);
+		}
 	}
 
 	public static void SetVideoPosition( Activity act, float position )
@@ -2457,6 +2589,12 @@ public class AGKHelper {
 		video.pos = position;
 		video.action = 9;
 		act.runOnUiThread(video);
+	}
+
+	// youtube
+	static void PlayYoutubeVideo( Activity act, String key, String video, int time )
+	{
+
 	}
 
 	// camera to image
@@ -2523,6 +2661,7 @@ public class AGKHelper {
 	public static int g_iSpeechReady = 0;
 	public static int g_iIsSpeaking = 0;
 	public static int g_iSpeechIDLast = 0;
+	static Object[] g_SpeechLanguages = null;
 
 	public static void TextToSpeechSetup( Activity act )
 	{
@@ -2531,6 +2670,14 @@ public class AGKHelper {
 		g_pSpeechListener = new AGKSpeechListener();
 		g_pTextToSpeech = new TextToSpeech( act, g_pSpeechListener );
 		g_pTextToSpeech.setOnUtteranceCompletedListener(g_pSpeechListener);
+
+		List<TextToSpeech.EngineInfo> engines = g_pTextToSpeech.getEngines();
+		for ( TextToSpeech.EngineInfo engine: engines )
+		{
+			Log.i( "TextToSpeech", "Engine: " + engine.name );
+		}
+
+		Log.i( "TextToSpeech", "Default Engine: " + g_pTextToSpeech.getDefaultEngine() );
 	}
 
 	public static int GetTextToSpeechReady()
@@ -2571,35 +2718,34 @@ public class AGKHelper {
 		HashMap<String,String> hashMap = new HashMap();
 		hashMap.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, Integer.toString(g_iSpeechIDLast) );
 
-		g_pTextToSpeech.speak( text, queueMode, hashMap );
+		if ( g_pTextToSpeech.speak( text, queueMode, hashMap ) < 0 )
+		{
+			Log.e( "TextToSpeech", "Failed to queue speech" );
+		}
 	}
 
 	public static int GetSpeechNumVoices( Activity act )
 	{
-		if ( g_pTextToSpeech == null ) return 0;
-		if ( Build.VERSION.SDK_INT < 21 ) return 0;
-
-		return g_pTextToSpeech.getVoices().size();
+		if ( g_SpeechLanguages == null ) return 0;
+		return g_SpeechLanguages.length;
 	}
 
 	public static String GetSpeechVoiceLanguage( Activity act, int index )
 	{
-		if ( g_pTextToSpeech == null ) return "";
-		if ( Build.VERSION.SDK_INT < 21 ) return "";
-		if ( index < 0 || index >= g_pTextToSpeech.getVoices().size() ) return "";
+		if ( g_SpeechLanguages == null ) return "";
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return "";
 
-		Voice voice = (Voice) g_pTextToSpeech.getVoices().toArray()[ index ];
-		return voice.getLocale().toString();
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		return locale.toString();
 	}
 
 	public static String GetSpeechVoiceName( Activity act, int index )
 	{
-		if ( g_pTextToSpeech == null ) return "";
-		if ( Build.VERSION.SDK_INT < 21 ) return "";
-		if ( index < 0 || index >= g_pTextToSpeech.getVoices().size() ) return "";
+		if ( g_SpeechLanguages == null ) return "";
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return "";
 
-		Voice voice = (Voice) g_pTextToSpeech.getVoices().toArray()[ index ];
-		return voice.getName();
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		return locale.getDisplayName();
 	}
 
 	public static void SetSpeechLanguage( Activity act, String lang )
@@ -2608,6 +2754,25 @@ public class AGKHelper {
 		String[] parts = lang.split("_");
 		if ( parts.length <= 1 ) g_pTextToSpeech.setLanguage( new Locale(lang) );
 		else g_pTextToSpeech.setLanguage( new Locale(parts[0],parts[1]) );
+	}
+
+	public static void SetSpeechLanguageByID( Activity act, String sID )
+	{
+		if ( g_SpeechLanguages == null ) return;
+
+		int index = 0;
+		try {
+			index = Integer.parseInt(sID);
+		}
+		catch( NumberFormatException e )
+		{
+			Log.e( "SetSpeechLanguageByID", "Invalid language ID: " + sID );
+			return;
+		}
+		if ( index < 0 || index >= g_SpeechLanguages.length ) return;
+
+		Locale locale = (Locale)g_SpeechLanguages[ index ];
+		g_pTextToSpeech.setLanguage( locale );
 	}
 
 	public static void SetSpeechRate( Activity act, float rate )
@@ -2959,13 +3124,22 @@ public class AGKHelper {
 	}
 
 	// local notifications
+	static NotificationChannel mNotificationChannel = null;
 	public static void SetNotification( Activity act, int id, int unixtime, String message )
 	{
+		if (mNotificationChannel == null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+		{
+			NotificationManager mNotificationManager = (NotificationManager) act.getSystemService(Context.NOTIFICATION_SERVICE);
+			mNotificationChannel = new NotificationChannel("notify","Notifications", NotificationManager.IMPORTANCE_DEFAULT );
+			mNotificationChannel.setDescription("App Notifications");
+			mNotificationManager.createNotificationChannel(mNotificationChannel);
+		}
+
 		Intent intent = new Intent(act, NotificationAlarmReceiver.class);
 		intent.putExtra("title", act.getString(R.string.app_name));
 		intent.putExtra("message", message);
 		intent.putExtra("id",id);
-		PendingIntent sender = PendingIntent.getBroadcast(act, id, intent, 0);
+		PendingIntent sender = PendingIntent.getBroadcast(act, id, intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
 		// Get the AlarmManager service
 		AlarmManager am = (AlarmManager) act.getSystemService(Context.ALARM_SERVICE);
@@ -2975,7 +3149,7 @@ public class AGKHelper {
 	public static void CancelNotification( Activity act, int id )
 	{
 		Intent intent = new Intent(act, NotificationAlarmReceiver.class);
-		PendingIntent sender = PendingIntent.getBroadcast(act, id, intent, 0);
+		PendingIntent sender = PendingIntent.getBroadcast(act, id, intent, PendingIntent.FLAG_UPDATE_CURRENT);
 
 		// Get the AlarmManager service
 		AlarmManager am = (AlarmManager) act.getSystemService(Context.ALARM_SERVICE);
@@ -2991,11 +3165,23 @@ public class AGKHelper {
 	{
 		return act.getWindowManager().getDefaultDisplay().getRotation();
 	}
-	
+
 	public static String GetDeviceID(Activity nativeactivityptr)
 	{
 		// This ID will remain constant for this device until a factory reset is performed
-		String uuid = Secure.getString(nativeactivityptr.getContentResolver(), Secure.ANDROID_ID);		
+		String uuid = Secure.getString(nativeactivityptr.getContentResolver(), Secure.ANDROID_ID);
+		if ( uuid == null || uuid.equals("") )
+		{
+			SharedPreferences sharedPrefs = nativeactivityptr.getSharedPreferences( "PREF_UNIQUE_ID", Context.MODE_PRIVATE);
+			uuid = sharedPrefs.getString( "PREF_UNIQUE_ID", null);
+
+			if (uuid == null || uuid.equals("")) {
+				uuid = UUID.randomUUID().toString();
+				SharedPreferences.Editor editor = sharedPrefs.edit();
+				editor.putString("PREF_UNIQUE_ID", uuid);
+				editor.commit();
+			}
+		}
 		return uuid;
 	}
 
@@ -3028,6 +3214,7 @@ public class AGKHelper {
 	public static String[] g_sPurchaseProductPrice = new String[MAX_PRODUCTS];
 	public static String[] g_sPurchaseProductDesc = new String[MAX_PRODUCTS];
 	public static int[] g_iPurchaseProductTypes = new int[MAX_PRODUCTS];
+	public static String[] g_sPurchaseProductSignature = new String[MAX_PRODUCTS];
 	public static Activity g_pAct = null;
 	public static final Object iapLock = new Object();
 	public static int g_iIAPStatus = 0;
@@ -3069,9 +3256,7 @@ public class AGKHelper {
 
 		g_iIAPStatus = 1;
 
-		// moved to AGKActivity.java
-		//final AGKPurchasingListener purchasingListener = new AGKPurchasingListener();
-		//PurchasingService.registerListener(act, purchasingListener);
+		// purchase listener is created in OnCreate
 
 		final Set<String> productSkus = new HashSet<String>();
 		for (int i = 0; i < g_iNumProducts; i++) {
@@ -3113,6 +3298,7 @@ public class AGKHelper {
 
 		g_iPurchaseState = 0;
 		g_iPurchaseProductStates[ ID ] = 0;
+		g_sPurchaseProductSignature[ ID ] = "";
 		Log.i("IAB MakePurchase", "Buying " + g_sPurchaseProductNames[ID]);
 
 		PurchasingService.purchase(g_sPurchaseProductNames[ID] );
@@ -3144,6 +3330,15 @@ public class AGKHelper {
 		{
 			if (ID < 0 || ID >= MAX_PRODUCTS || g_sPurchaseProductDesc[ID] == null) return "";
 			return g_sPurchaseProductDesc[ID];
+		}
+	}
+
+	public static String iapGetSignature( int ID )
+	{
+		synchronized (iapLock)
+		{
+			if ( ID < 0 || ID >= MAX_PRODUCTS || g_sPurchaseProductSignature[ID] == null ) return "";
+			return g_sPurchaseProductSignature[ID];
 		}
 	}
 	
@@ -3183,47 +3378,45 @@ public class AGKHelper {
 		final String applicationName = (String) (ai != null ? pm.getApplicationLabel(ai) : "unknown");
 		return applicationName;
 	}
-	
-	// image chooser code
-	//private static MyJavaActivity myActivity = null;
-	//private static MyJavaActivity imageActivity = null;
-    private static String storeimagepath = null;
-	public static void StoreImagePath(String path) { storeimagepath=path; }
-	
-	// Function to launch Choose Image intent
-	public static String StartChooseImage(Activity nativeactivityptr)
-	{
-		// Ensure we can create a new activity in this static function
-		Looper.prepare();
-		
-		// Create new intent and launch it (choose image)
-		Intent myIntent = new Intent(nativeactivityptr, MyJavaActivity.class);
-		nativeactivityptr.startActivity(myIntent);
-		
-		// return immediately - fun string return (can be replaced with boolean/int)
-		return "success";
-    }
-	
-	// Retrieve image path string when we return to main NativeActivity
-	public static String GetChosenImagePath()
-	{
-		if ( storeimagepath == null ) return "";
 
-		String result = storeimagepath;
-		storeimagepath = null;
-		return result;
-    }
-	
-	// camera
-	public static void CaptureImage(Activity nativeactivityptr)
+	// image chooser code
+	public static int iChoosingImage = 0;
+	public static String sChosenImagePath = "";
+
+	// Function to launch Choose Image intent
+	public static void StartChooseImage(Activity act, String path)
 	{
+		if ( iChoosingImage == 1 ) return;
+		sChosenImagePath = path;
+
 		// Ensure we can create a new activity in this static function
 		Looper.prepare();
-				
+
+		iChoosingImage = 1;
+		Intent photoPickerIntent = new Intent(Intent.ACTION_GET_CONTENT);
+		photoPickerIntent.setType("image/*");
+		act.startActivityForResult(photoPickerIntent, 9005);
+	}
+
+	public static int ChooseImageResult() { return iChoosingImage; }
+
+	// camera
+	public static int iCapturingImage = 0; // 0=no image, 1=capturing, 2=got image
+	public static String sCameraSavePath = "";
+	public static void CaptureImage(Activity nativeactivityptr, String path)
+	{
+		if ( iCapturingImage == 1 ) return;
+		sCameraSavePath = path;
+
+		// Ensure we can create a new activity in this static function
+		Looper.prepare();
+
+		iCapturingImage = 1;
 		Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-		cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, Uri.parse("file:///sdcard/capturedimage.jpg"));
-		nativeactivityptr.startActivity(cameraIntent);    
-    }
+		nativeactivityptr.startActivityForResult( cameraIntent, 9004 );
+	}
+
+	public static int CaptureImageResult() { return iCapturingImage; }
 	
 	public static String GetLanguage()
 	{
@@ -3422,6 +3615,8 @@ public class AGKHelper {
 	{
 		return 0;
 	}
+
+	public static int GetExpansionError(Activity act) { return 0; }
 	
 	public static void DownloadExpansion(Activity act)
 	{
@@ -3654,7 +3849,6 @@ public class AGKHelper {
 			input.read(bytes, 0, length);
 			input.close();
 			result = new String( bytes, "UTF-8" );
-			Log.w("Shared Data","Name: " + varName + " Value: " + result);
 		}
 		catch( FileNotFoundException e ) { return defaultValue; }
 		catch( IOException e )
@@ -3727,33 +3921,14 @@ public class AGKHelper {
 		String sExt = "";
 		if ( pos >= 0 ) sExt = sPath.substring(pos+1);
 
-		File DownloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-		File dst = new File( DownloadFolder, sFileName );
-
 		File src = new File(sPath);
 
-		//copy to external storage
-		try {
-			InputStream in = new FileInputStream(src);
-			OutputStream out = new FileOutputStream(dst);
-
-			// Transfer bytes from in to out
-			byte[] buf = new byte[1024];
-			int len;
-			while ((len = in.read(buf)) > 0) {
-				out.write(buf, 0, len);
-			}
-			in.close();
-			out.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
-
 		String sMIME = MimeTypeMap.getSingleton().getMimeTypeFromExtension(sExt);
+		Uri uri = FileProvider.getUriForFile(act, act.getApplicationContext().getPackageName() + ".provider", src);
 
 		Intent target = new Intent( Intent.ACTION_VIEW );
-		target.setDataAndType( Uri.fromFile(dst),sMIME );
-		target.setFlags( Intent.FLAG_ACTIVITY_NO_HISTORY );
+		target.setDataAndType( uri, sMIME );
+		target.setFlags( Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_GRANT_READ_URI_PERMISSION );
 
 		try {
 			act.startActivity(target);
@@ -3770,7 +3945,7 @@ public class AGKHelper {
 		target.putExtra( Intent.EXTRA_TEXT, sText );
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share Text"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share text");
 		}
@@ -3783,35 +3958,18 @@ public class AGKHelper {
 		if ( pos >= 0 ) sFileName = sPath.substring(pos+1);
 		else sFileName = sPath;
 
-		File DownloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-		File dst = new File( DownloadFolder, sFileName );
-
 		File src = new File(sPath);
 
-		//copy to external storage
-		try {
-			InputStream in = new FileInputStream(src);
-			OutputStream out = new FileOutputStream(dst);
-
-			// Transfer bytes from in to out
-			byte[] buf = new byte[1024];
-			int len;
-			while ((len = in.read(buf)) > 0) {
-				out.write(buf, 0, len);
-			}
-			in.close();
-			out.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+		Uri uri = FileProvider.getUriForFile(act, act.getApplicationContext().getPackageName() + ".provider", src);
 
 		Intent target = new Intent( Intent.ACTION_SEND );
 		target.setType( "image/*" );
-		target.putExtra(Intent.EXTRA_TITLE, "Share Image");
-		target.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(dst));
+		target.putExtra( Intent.EXTRA_TITLE, "Share Image" );
+		target.putExtra( Intent.EXTRA_STREAM, uri );
+		target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share Image"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share images");
 		}
@@ -3824,38 +3982,49 @@ public class AGKHelper {
 		if ( pos >= 0 ) sFileName = sPath.substring(pos+1);
 		else sFileName = sPath;
 
-		File DownloadFolder = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-		File dst = new File( DownloadFolder, sFileName );
-
 		File src = new File(sPath);
-
-		//copy to external storage
-		try {
-			InputStream in = new FileInputStream(src);
-			OutputStream out = new FileOutputStream(dst);
-
-			// Transfer bytes from in to out
-			byte[] buf = new byte[1024];
-			int len;
-			while ((len = in.read(buf)) > 0) {
-				out.write(buf, 0, len);
-			}
-			in.close();
-			out.close();
-		} catch (IOException e) {
-			e.printStackTrace();
-		}
+		Uri uri = FileProvider.getUriForFile(act, act.getApplicationContext().getPackageName() + ".provider", src);
 
 		Intent target = new Intent( Intent.ACTION_SEND );
 		target.setType( "image/*" );
 		target.putExtra(Intent.EXTRA_TITLE, "Share Image And Text");
-		target.putExtra( Intent.EXTRA_STREAM, Uri.fromFile(dst) );
+		target.putExtra( Intent.EXTRA_STREAM, uri );
 		target.putExtra( Intent.EXTRA_TEXT, sText );
+		target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
 		try {
-			act.startActivity(target);
+			act.startActivity(Intent.createChooser(target,"Share"));
 		} catch (ActivityNotFoundException e) {
 			ShowMessage(act,"No application found to share images");
+		}
+	}
+
+	public static void ShareFile( Activity act, String sPath )
+	{
+		int pos = sPath.lastIndexOf('/');
+		String sFileName;
+		if ( pos >= 0 ) sFileName = sPath.substring(pos+1);
+		else sFileName = sPath;
+
+		// get extension
+		pos = sPath.lastIndexOf('.');
+		String sExt = "";
+		if ( pos >= 0 ) sExt = sPath.substring(pos+1);
+
+		File src = new File(sPath);
+
+		String sMIME = MimeTypeMap.getSingleton().getMimeTypeFromExtension(sExt);
+		Uri uri = FileProvider.getUriForFile(act, act.getApplicationContext().getPackageName() + ".provider", src);
+
+		Intent target = new Intent( Intent.ACTION_SEND );
+		target.setType( sMIME );
+		target.putExtra( Intent.EXTRA_STREAM, uri );
+		target.setFlags( Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_GRANT_READ_URI_PERMISSION );
+
+		try {
+			act.startActivity(Intent.createChooser(target,"Share File"));
+		} catch (ActivityNotFoundException e) {
+			ShowMessage(act,"No application found to share file type \"" + sExt + "\"");
 		}
 	}
 

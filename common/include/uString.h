@@ -15,7 +15,7 @@ namespace AGK
 	class uString
 	{
 		protected:
-			// a 64bit interpreter would depend on this struct being a multiple of 8 bytes in size for use in AGK types
+			// a 64bit interpreter depends on this struct being a multiple of 8 bytes in size for use in AGK types
 			char* m_pData;
 			unsigned int m_iNumChars; // number of UTF-8 characters in the string
 			unsigned int m_iLength; // length of the current string in bytes
@@ -89,6 +89,7 @@ namespace AGK
 			uString& ReplaceStr( const char* find, const char* replace, int qty=-1 ); //replaces all instances of "find" with "replace"
 			uString& Upper( ); //converts to upper case
 			uString& Lower( ); //converts to lower case
+			uString& Unescape(); //converts backslash escaped characters to their true values
 
 			int ByteAt( unsigned int index );
 			int CharAt( unsigned int index );

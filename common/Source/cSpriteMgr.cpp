@@ -839,7 +839,7 @@ void cSpriteMgrEx::DrawSplit( int depth, int side )
 					iLastScissorHeight = iScissorHeight;
 				}
 				
-				if ( iScissorWidth != 0 && iScissorHeight != 0 )
+				if ( iScissorX != 0 || iScissorY != 0 || iScissorWidth != 0 || iScissorHeight != 0 )
 				{
 					agk::PlatformScissor( iScissorX, iScissorY, iScissorWidth, iScissorHeight );
 				}
@@ -874,7 +874,7 @@ void cSpriteMgrEx::DrawDebug( )
 		if ( pMember->GetType() == 1 ) 
 		{
 			// if shape set but not physics enabled
-			if ( pMember->GetSprite()->m_phyShape && !pMember->GetSprite()->m_phyBody )
+			if ( pMember->GetSprite()->GetVisible() && pMember->GetSprite()->m_phyShape && !pMember->GetSprite()->m_phyBody )
 			{
 				switch( pMember->GetSprite()->m_phyShape->m_type )
 				{

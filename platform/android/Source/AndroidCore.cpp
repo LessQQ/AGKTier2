@@ -120,8 +120,6 @@ namespace AGK
 	
 	// an audio player that plays nothing to force the android volume control buttons to media mode
 	SLObjectItf pTempPlayer = NULL;
-	SLPlayItf pTempPlayerPlay = 0;
-	SLAndroidSimpleBufferQueueItf pTempPlayerQueue = 0;
 	bool g_bTempFinished = false;
 	unsigned char *pSilence = 0;
 	
@@ -252,6 +250,7 @@ namespace AGK
 	float g_fTextStartX = 0;
 	float g_fTextStartY = 0;
 	bool g_bPasswordMode = false;
+	float g_fChangeTimer = 0;
 	
 	cSprite *pTextBackground = 0;
 	bool g_bEditBoxHack = false;
@@ -445,6 +444,56 @@ void agk::SetScreenResolution( int width, int height )
     __android_log_print( ANDROID_LOG_ERROR, "native-activity", "%s", sMsg.GetStr() );
 
 	g_iUpdateSurface = 1;
+}
+
+char* agk::GetURLSchemeText()
+//****
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "GetLastURIText", "()Ljava/lang/String;" );
+
+	// call our java class method
+	jstring text = (jstring) lJNIEnv->CallStaticObjectMethod( AGKHelper, method );
+
+	jboolean bCopy;
+	const char* sText = lJNIEnv->GetStringUTFChars( text, &bCopy );
+
+	char *str = new char[ strlen(sText)+1 ];
+	strcpy( str, sText );
+
+	lJNIEnv->ReleaseStringUTFChars( text, sText );
+	lJNIEnv->DeleteLocalRef( text );
+
+	vm->DetachCurrentThread();
+
+	return str;
+}
+
+void agk::ClearURLSchemeText()
+//****
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "ClearLastURIText", "()V" );
+
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method );
+
+	vm->DetachCurrentThread();
 }
 
 void agk::GetDeviceName( uString &outString )
@@ -717,6 +766,29 @@ int agk::GetExpansionFileState()
 	return state;
 }
 
+int agk::GetExpansionFileError()
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	// get NativeActivity object (clazz)
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	// get the method from our java class
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "GetExpansionError", "(Landroid/app/Activity;)I" );
+
+	// call our java class method
+	int error = lJNIEnv->CallStaticIntMethod( AGKHelper, method, lNativeActivity );
+
+	vm->DetachCurrentThread();
+
+	return error;
+}
+
 void agk::DownloadExpansionFile()
 {
 	JNIEnv* lJNIEnv = g_pActivity->env;
@@ -908,11 +980,11 @@ bool agk::PlatformGetDeviceID( uString &out )
 	const char* sDeviceID = lJNIEnv->GetStringUTFChars( devicestring, &bCopy );
 	
 	out.SetStr( "" );
-	if ( !sDeviceID || strlen(sDeviceID) < 16 ) return false;	
+	if ( !sDeviceID || strlen(sDeviceID) < 1 ) return false;	
 	
 	unsigned int result[ 5 ];
 	SHA1 sha;
-	sha.Input( sDeviceID, 16 );
+	sha.Input( sDeviceID, strlen(sDeviceID) );
 	sha.Result( &(result[0]) );
 	out.Format( "%08X%08X%08X%08X%08X", result[0], result[1], result[2], result[3], result[4] );
 	
@@ -1046,7 +1118,7 @@ void agk::PlatformInitFilePaths()
 		strcat( szWriteDir, "/" );
 	}
 
-	// make sure this value is set here incase restore is called without changing path
+	// make sure this value is set here in case restore is called without changing path
 	strcpy( szOriginalWriteDir, szWriteDir );
 
 	chdir( szWriteDir );
@@ -1077,12 +1149,17 @@ void agk::PlatformUpdateWritePath()
 			strcat( szWriteDir, sModule );
 			strcat( szWriteDir, "/" );
 
-			chdir( internal );
-			if ( chdir( sModule ) < 0 )
+			int fd = open( internal, O_RDONLY | O_CLOEXEC );
+			int newFd = openat( fd, sModule, O_RDONLY | O_CLOEXEC );
+			if ( newFd >= 0 )
 			{
-				mkdir( sModule, 0777 );
-				chdir( sModule );
+				close( newFd );
 			}
+			else
+			{
+				mkdirat( fd, sModule, 0777 );
+			}
+			close( fd );
 		}
 	}
 	else
@@ -1097,12 +1174,17 @@ void agk::PlatformUpdateWritePath()
 			strcat( szWriteDir, sModule );
 			strcat( szWriteDir, "/" );
 
-			chdir( internal );
-			if ( chdir( sModule ) < 0 )
+			int fd = open( szWriteDir, O_RDONLY | O_CLOEXEC );
+			int newFd = openat( fd, sModule, O_RDONLY | O_CLOEXEC );
+			if ( newFd >= 0 )
 			{
-				mkdir( sModule, 0777 );
-				chdir( sModule );
+				close( newFd );
 			}
+			else
+			{
+				mkdirat( fd, sModule, 0777 );
+			}
+			close( fd );
 		}
 	}
 	
@@ -1230,8 +1312,8 @@ void agk::PlatformInitGL( void* ptr )
 	// text input setup
 	float DevToVirX = 1.0f;
 	float DevToVirY = 1.0f;
-	if ( agk::m_fTargetViewportWidth > 0 ) DevToVirX = agk::GetVirtualWidth() / agk::m_fTargetViewportWidth;
-	if ( agk::m_fTargetViewportHeight > 0 )  DevToVirY = agk::GetVirtualHeight() / agk::m_fTargetViewportHeight;
+	if ( agk::m_fTargetViewportWidth > 0 ) DevToVirX = (agk::GetDeviceDPI() / 150.0f) * agk::GetVirtualWidth() / agk::m_fTargetViewportWidth;
+	if ( agk::m_fTargetViewportHeight > 0 )  DevToVirY = (agk::GetDeviceDPI() / 150.0f) * agk::GetVirtualHeight() / agk::m_fTargetViewportHeight;
 	
 	float width = 250 * DevToVirX;
 	float height = 22 * DevToVirY;
@@ -1744,7 +1826,7 @@ void agk::PlatformCompleteInputInit()
 	
 }
 
-void showKeyboard( bool show, int multiline )
+void showKeyboard( bool show, int multiline, int inputType )
 {
 	JNIEnv* lJNIEnv = g_pActivity->env;
 	JavaVM* vm = g_pActivity->vm;
@@ -1757,10 +1839,10 @@ void showKeyboard( bool show, int multiline )
 
 	if ( show )
 	{
-		jmethodID ShowKeyboard = lJNIEnv->GetStaticMethodID( AGKHelper, "ShowKeyboard","(Landroid/app/Activity;I)V" );
+		jmethodID ShowKeyboard = lJNIEnv->GetStaticMethodID( AGKHelper, "ShowKeyboard","(Landroid/app/Activity;II)V" );
 		if ( !ShowKeyboard ) agk::Warning( "Failed to show the keyboard, is this app using the latest AGKHelper.java file?" );
 
-		lJNIEnv->CallStaticVoidMethod( AGKHelper, ShowKeyboard, lNativeActivity, multiline );
+		lJNIEnv->CallStaticVoidMethod( AGKHelper, ShowKeyboard, lNativeActivity, multiline, inputType );
 	}
 	else
 	{
@@ -1781,25 +1863,25 @@ void agk::KeyboardMode( int mode )
 		{
 			if ( m_bInputStarted )
 			{
-				showKeyboard( true, 0 );
+				showKeyboard( true, 0, 0 );
 				agk::PlatformChangeTextInput( m_sCurrInput );
 			}
 			else if ( cEditBox::GetCurrentFocus() ) 
 			{
-				showKeyboard( true, cEditBox::GetCurrentFocus()->GetMultiLine() ? 1 : 0 );
+				showKeyboard( true, cEditBox::GetCurrentFocus()->GetMultiLine() ? 1 : 0, cEditBox::GetCurrentFocus()->GetInputType() );
 				uString currText;
 				cEditBox::GetCurrentFocus()->GetText( currText );
 				agk::PlatformChangeTextInput( currText );
 			}		
 		}
-		else showKeyboard( false, 0 );
+		else showKeyboard( false, 0, 0 );
 	}
 	m_iKeyboardMode = mode;
 }
 
 int agk::PlatformInputPointerPressed(float x, float y)
 {
-	//showKeyboard(true,0);
+	//showKeyboard(true,0,0);
 
 	if ( g_bEditBoxHack )
 	{
@@ -1843,7 +1925,7 @@ int agk::PlatformInputPointerPressed(float x, float y)
 			}
 			else
 			{
-				showKeyboard(false,0);
+				showKeyboard(false,0,0);
 				m_bInputStarted = false;
 				m_bInputCancelled = true;
 				int editbox = agk::GetCurrentEditBox();
@@ -1854,13 +1936,13 @@ int agk::PlatformInputPointerPressed(float x, float y)
 	}
 	else
 	{
-		showKeyboard(true,0);
+		showKeyboard(true,0,0);
 		agk::PlatformChangeTextInput( m_sCurrInput );
 	}
 	/*
 	else
 	{
-		showKeyboard(false,0);
+		showKeyboard(false,0,0);
 		m_bInputStarted = false;
 		m_bInputCancelled = true;
 		int editbox = agk::GetCurrentEditBox();
@@ -1875,7 +1957,7 @@ void agk::PlatformStartTextInput( const char *sInitial )
 {
 	if ( m_bInputStarted ) return;
 
-	showKeyboard( true,0 );
+	showKeyboard( true,0,0 );
 
 	// doesn't work
 	//ANativeActivity_showSoftInput( g_pActivity, ANATIVEACTIVITY_SHOW_SOFT_INPUT_FORCED );
@@ -1905,6 +1987,8 @@ void agk::PlatformStartTextInput( const char *sInitial )
 		lJNIEnv->DeleteLocalRef( text );
 
 		vm->DetachCurrentThread();
+
+		g_fChangeTimer = 0.25;
 	}
 }
 
@@ -1912,7 +1996,7 @@ void agk::PlatformStopTextInput()
 {
 	if ( !m_bInputStarted ) return;
 
-	showKeyboard( false,0 );
+	showKeyboard( false,0,0 );
 }
 
 void agk::PlatformChangeTextInput( const char* str )
@@ -1937,12 +2021,20 @@ void agk::PlatformChangeTextInput( const char* str )
 		lJNIEnv->DeleteLocalRef( text );
 
 		vm->DetachCurrentThread();
+
+		g_fChangeTimer = 0.25;
 	}
 }
 
 void agk::PlatformUpdateTextInput()
 {
 	if ( !m_bInputStarted ) return;
+
+	if ( g_fChangeTimer > 0 )
+	{
+		g_fChangeTimer -= agk::GetFrameTime();
+		return;
+	}
 
 	// if virtual keyboard then grab text from Android edit box instead
 	if ( m_iKeyboardMode == 2 )
@@ -1980,7 +2072,7 @@ void agk::PlatformUpdateTextInput()
 		{
 			m_bInputCancelled = false;
 			m_bInputStarted = false;
-			showKeyboard( false,0 );
+			showKeyboard( false,0,0 );
 			int editbox = agk::GetCurrentEditBox();
 			if ( editbox > 0 ) agk::SetEditBoxFocus( editbox, 0 );
 		}
@@ -2017,7 +2109,7 @@ void agk::PlatformUpdateTextInput()
 	
 	if ( agk::GetPointerPressed() && m_bInputStarted )
 	{
-		showKeyboard(false,0);
+		showKeyboard(false,0,0);
 		m_bInputStarted = false;
 		m_bInputCancelled = true;
 		int editbox = agk::GetCurrentEditBox();
@@ -2029,7 +2121,7 @@ void agk::PlatformUpdateTextInput()
 	{
 		m_bInputStarted = false;
 		m_bInputCancelled = false;
-		showKeyboard( false,0 );
+		showKeyboard( false,0,0 );
 		int editbox = agk::GetCurrentEditBox();
 		if ( editbox > 0 ) agk::SetEditBoxFocus( editbox, 0 );
 	}
@@ -2039,7 +2131,7 @@ void agk::PlatformUpdateTextInput()
 	{
 		m_bInputCancelled = false;
 		m_bInputStarted = false;
-		showKeyboard( false,0 );
+		showKeyboard( false,0,0 );
 		int editbox = agk::GetCurrentEditBox();
 		if ( editbox > 0 ) agk::SetEditBoxFocus( editbox, 0 );
 	}
@@ -2203,8 +2295,8 @@ void agk::PlatformDrawTextInput()
 	float virtualWidth = m_iDisplayWidth;
 	float virtualHeight = m_iDisplayHeight;
 	
-	float DevToVirX = virtualWidth / agk::m_fTargetViewportWidth;
-	float DevToVirY = virtualHeight / agk::m_fTargetViewportHeight;
+	float DevToVirX = (agk::GetDeviceDPI() / 150.0f) * virtualWidth / agk::m_fTargetViewportWidth;
+	float DevToVirY = (agk::GetDeviceDPI() / 150.0f) * virtualHeight / agk::m_fTargetViewportHeight;
 	
 	float width = 300 * DevToVirX;
 	float height = 30 * DevToVirY;
@@ -2346,23 +2438,18 @@ void agk::PlatformResumedOpenGL()
 	{
 		if ( m_iUncollectedCaptureImage ) agk::DeleteImage( m_iUncollectedCaptureImage );
 		
-		FILE *pFile = fopen( "/sdcard/capturedimage.jpg", "rb" );
+		uString sPath("/capturedimage.jpg");
+		agk::PlatformGetFullPathWrite(sPath);
+
+		FILE *pFile = fopen( sPath.GetStr(), "rb" );
 		if ( !pFile )
 		{
 			m_iUncollectedCaptureImage = 0;
 		}
 		else
 		{
-			//int iID = agk::LoadImage( "/capturedimage.jpg" );
-
-			cImage* pImage = new cImage();
-			UINT iID = m_cImageList.GetFreeID( MAX_IMAGES );
-			m_cImageList.AddItem( pImage, iID );
-			m_iUncollectedCaptureImage = iID;
-
-			pImage->Load( "raw:/sdcard/capturedimage.jpg" );
-			
-			remove( "/sdcard/capturedimage.jpg" );
+			fclose(pFile);
+			m_iUncollectedCaptureImage = agk::LoadImage( "/capturedimage.jpg" );
 		}
 		
 		m_bIsCapturing = false;	
@@ -2370,56 +2457,19 @@ void agk::PlatformResumedOpenGL()
 	
 	if ( m_bIsChoosing )
 	{
-		// when choose intent selects image, activity finishes and returns here
-		// by which time the image path string has been collected and saved
-		JNIEnv* lJNIEnv = g_pActivity->env;
-		JavaVM* vm = g_pActivity->vm;
-		vm->AttachCurrentThread(&lJNIEnv, NULL);
-		jobject lNativeActivity = g_pActivity->clazz;
-		if ( !lNativeActivity ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get native activity pointer");
-		jclass classActivity = lJNIEnv->FindClass("android/app/NativeActivity");
-		if ( !classActivity ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get class NativeActivity");
-		jmethodID getClassLoader = lJNIEnv->GetMethodID(classActivity,"getClassLoader", "()Ljava/lang/ClassLoader;");
-		if ( !getClassLoader ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get getClassLoader");
-		jobject cls = lJNIEnv->CallObjectMethod(lNativeActivity, getClassLoader);
-		if ( !cls ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get cls");
-		jclass classLoader = lJNIEnv->FindClass("java/lang/ClassLoader");
-		if ( !classLoader ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get classLoader");
-		jmethodID findClass = lJNIEnv->GetMethodID(classLoader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-		if ( !findClass ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get findClass");
-		jstring strClassName = lJNIEnv->NewStringUTF("com/thegamecreators/agk_player/AGKHelper");
-		jclass MyJavaClass = (jclass)lJNIEnv->CallObjectMethod(cls, findClass, strClassName);
-		if ( !MyJavaClass ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get MyJavaClass");
-		lJNIEnv->DeleteLocalRef( strClassName );
-
-		// get the method from our java class
-		jmethodID myGetChosenImagePath = lJNIEnv->GetStaticMethodID( MyJavaClass, "GetChosenImagePath","()Ljava/lang/String;" );
-
-		// call our java class method and return the image path
-		jstring jchosenimagepath = (jstring) lJNIEnv->CallStaticObjectMethod( MyJavaClass, myGetChosenImagePath, lNativeActivity );
-
 		if ( m_pUncollectedChosenImage ) delete m_pUncollectedChosenImage;
 		m_pUncollectedChosenImage = 0;
+				
+		uString sPath("/chosenimage.jpg");
+		agk::PlatformGetFullPathWrite(sPath);
 
-		// report the path we have found		
-		jboolean bCopy;
-		const char* absolutepathincmnt = lJNIEnv->GetStringUTFChars( jchosenimagepath, &bCopy );
-		if ( absolutepathincmnt && strlen(absolutepathincmnt) > 0 )
-		{		
-			// now create the image to complete the job
-			if ( m_pUncollectedChosenImage ) delete m_pUncollectedChosenImage;
+		FILE *pFile = fopen( sPath.GetStr(), "rb" );
+		if ( pFile )
+		{
+			fclose(pFile);
 			m_pUncollectedChosenImage = new cImage();
-			uString sPath( "raw:" ); sPath.Append( absolutepathincmnt );
-			m_pUncollectedChosenImage->Load ( sPath, false );
-
-			if ( strstr(absolutepathincmnt, "chosenImage.jpg") ) remove( absolutepathincmnt );
+			m_pUncollectedChosenImage->Load( "/chosenimage.jpg" );
 		}
-		
-		lJNIEnv->ReleaseStringUTFChars( jchosenimagepath, absolutepathincmnt );
-		lJNIEnv->DeleteLocalRef( jchosenimagepath );
-		
-		// ensure we restore VM
-		vm->DetachCurrentThread();
 
 		// finished choosing image
 		m_bIsChoosing = false;
@@ -2988,61 +3038,10 @@ bool cImage::ChooseFromSystem()
 
 void agk::PlatformShowChooseScreen()
 {
-	// get JNI pointer
-	JNIEnv* lJNIEnv = g_pActivity->env;
+	uString sPath("/chosenimage.jpg");
+	agk::PlatformGetFullPathWrite(sPath);
+	remove( sPath );
 
-	// get Java VM pointer
-	JavaVM* vm = g_pActivity->vm;
-
-	// associate this native thread with main Java VM
-	vm->AttachCurrentThread(&lJNIEnv, NULL);
-
-	// get NativeActivity object (clazz)
-	jobject lNativeActivity = g_pActivity->clazz;
-	if ( !lNativeActivity ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get native activity pointer");
-
-	// get java class for NativeActivity
-	jclass classActivity = lJNIEnv->FindClass("android/app/NativeActivity");
-	if ( !classActivity ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get class NativeActivity");
-
-	// LEE: Get the classLoader from the native activity instance
-	// LEE: See http://blog.tewdew.com/post/6852907694/using-jni-from-a-native-activity
-	// http://blog.tewdew.com/post/6852907694/using-jni-from-a-native-activity
-	// http://pastebin.com/rkqvUaH3
-	// http://stackoverflow.com/questions/9286661/calling-a-constructor-fails-in-jni-android
-	// http://journals.ecs.soton.ac.uk/java/tutorial/native1.1/implementing/method.html
-	
-	// we need classLoader to find our OWN Java Class Code
-	jmethodID getClassLoader = lJNIEnv->GetMethodID(classActivity,"getClassLoader", "()Ljava/lang/ClassLoader;");
-	if ( !getClassLoader ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get getClassLoader");
-	jobject cls = lJNIEnv->CallObjectMethod(lNativeActivity, getClassLoader);
-	if ( !cls ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get cls");
-	jclass classLoader = lJNIEnv->FindClass("java/lang/ClassLoader");
-	if ( !classLoader ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get classLoader");
-	jmethodID findClass = lJNIEnv->GetMethodID(classLoader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-	if ( !findClass ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get findClass");
-
-	// use classLoader to find our java class code
-	jstring strClassName = lJNIEnv->NewStringUTF("com/thegamecreators/agk_player/AGKHelper");
-	jclass MyJavaClass = (jclass)lJNIEnv->CallObjectMethod(cls, findClass, strClassName);
-	if ( !MyJavaClass ) __android_log_print( ANDROID_LOG_ERROR, "native-activity","Failed to get AGKHelper");
-	lJNIEnv->DeleteLocalRef( strClassName );
-
-	// get the method from our java class
-	jmethodID myStartChooseImage = lJNIEnv->GetStaticMethodID( MyJavaClass, "StartChooseImage","(Landroid/app/Activity;)Ljava/lang/String;" );
-
-	// call our java class method and return the image path
-	jstring successstring = (jstring) lJNIEnv->CallStaticObjectMethod( MyJavaClass, myStartChooseImage, lNativeActivity );
-	lJNIEnv->DeleteLocalRef( successstring );
-
-	// NOTE: This carries on in the INTENT, and PlatformResume() finishes this off..
-
-	// detatch thread from Java VM before we leave
-	vm->DetachCurrentThread();
-}
-
-bool agk::PlatformShowCaptureScreen()
-{
 	JNIEnv* lJNIEnv = g_pActivity->env;
 	JavaVM* vm = g_pActivity->vm;
 	vm->AttachCurrentThread(&lJNIEnv, NULL);
@@ -3054,10 +3053,43 @@ bool agk::PlatformShowCaptureScreen()
 	jclass AGKHelper = GetAGKHelper(lJNIEnv);
 
 	// get the method from our java class
-	jmethodID camera = lJNIEnv->GetStaticMethodID( AGKHelper, "CaptureImage", "(Landroid/app/Activity;)V" );
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "StartChooseImage", "(Landroid/app/Activity;Ljava/lang/String;)V" );
 
-	// call our java class method
-	lJNIEnv->CallStaticVoidMethod( AGKHelper, camera, lNativeActivity );
+	jstring sText = lJNIEnv->NewStringUTF( sPath.GetStr() );
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sText );
+	lJNIEnv->DeleteLocalRef( sText );
+
+	vm->DetachCurrentThread();
+}
+
+bool agk::PlatformShowCaptureScreen()
+{
+	uString sPath("/capturedimage.jpg");
+	agk::PlatformGetFullPathWrite(sPath);
+	remove( sPath );
+
+	if ( CheckPermission( "Camera" ) != 2 )
+	{
+		agk::Error( "Cannot use the camera without the camera permission, use RequestPermission(\"Camera\") first" );
+		return false;
+	}
+
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	// get NativeActivity object (clazz)
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	// get the method from our java class
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "CaptureImage", "(Landroid/app/Activity;Ljava/lang/String;)V" );
+
+	jstring sText = lJNIEnv->NewStringUTF( sPath.GetStr() );
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sText );
+	lJNIEnv->DeleteLocalRef( sText );
 
 	vm->DetachCurrentThread();
 
@@ -3096,6 +3128,12 @@ int agk::GetNumDeviceCameras()
 
 int agk::SetDeviceCameraToImage( UINT cameraID, UINT imageID )
 {
+	if ( CheckPermission("Camera") != 2 )
+	{
+		agk::Error("Failed to set device camera to image, app does not have permission to access the camera, use RequestPermission first");
+		return 0;
+	}
+
 	cImage *pImage = m_cImageList.GetItem( imageID );
 	if ( pImage )
 	{
@@ -3459,8 +3497,9 @@ bool cImage::PlatformGetDataFromFile( const char* szFile, unsigned char **pData,
 		sPath.SetStr( szFile + strlen("expansion") );
 		sPath.Replace( ':', '/' );
 
-		if ( cFile::ExistsWrite( sPath ) ) agk::PlatformGetFullPathWrite( sPath );
-		else
+		// always load from expansion file in case it has changed
+		//if ( cFile::ExistsWrite( sPath ) ) agk::PlatformGetFullPathWrite( sPath );
+		//else
 		{
 			agk::PlatformGetFullPathWrite( sPath );
 			if ( !agk::ExtractExpansionFile( sPath, szFile ) ) return false;
@@ -3572,6 +3611,54 @@ void agk::VibrateDevice( float seconds )
 	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, seconds );
 
 	vm->DetachCurrentThread();
+}
+
+void agk::SetClipboardText( const char* szText )
+//****
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "SetClipboardText","(Landroid/app/Activity;Ljava/lang/String;)V" );
+	jstring sText = lJNIEnv->NewStringUTF( szText );
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sText );
+	lJNIEnv->DeleteLocalRef( sText );
+
+	vm->DetachCurrentThread();
+}
+
+char* agk::GetClipboardText()
+//****
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "GetClipboardText","(Landroid/app/Activity;)Ljava/lang/String;" );
+	jstring str = (jstring) lJNIEnv->CallStaticObjectMethod( AGKHelper, method, lNativeActivity );
+	jboolean bCopy;
+	const char* str2 = lJNIEnv->GetStringUTFChars( str, &bCopy );
+
+	char *retstr = new char[ strlen(str2) + 1 ];
+	strcpy( retstr, str2 );
+		
+	lJNIEnv->ReleaseStringUTFChars( str, str2 );
+	lJNIEnv->DeleteLocalRef( str );
+
+	vm->DetachCurrentThread();
+
+	return retstr;
 }
 
 // Music
@@ -4290,47 +4377,7 @@ void cSoundMgr::PlatformInit()
 		// no longer play the temp player, was only used to force the volume buttons to set the media volume instead 
 		// of notification volume, but Android now has an option to do this in the volume control
 		// we still need it to work out the max/min payback rates though
-		/*
-		// get the play interface
-		result = (*pTempPlayer)->GetInterface(pTempPlayer, SL_IID_PLAY, &(pTempPlayerPlay));
-		if ( result != SL_RESULT_SUCCESS)
-		{
-			agk::Warning( "Failed to get temp audio player interface" );
-			return;
-		}
 		
-		// get the buffer queue interface
-		result = (*pTempPlayer)->GetInterface(pTempPlayer, SL_IID_ANDROIDSIMPLEBUFFERQUEUE , &pTempPlayerQueue);
-		if ( result != SL_RESULT_SUCCESS)
-		{
-			agk::Warning( "Failed to get temp audio player buffer" );
-			return;
-		}
-		
-		result = (*pTempPlayerPlay)->RegisterCallback(pTempPlayerPlay, &TempSoundEventCallback, (void*)(pTempPlayerQueue) );
-		if ( result != SL_RESULT_SUCCESS )
-		{
-			agk::Warning( "Failed to set temp sound callback" );
-			return;
-		}
-
-		result = (*pTempPlayerPlay)->SetCallbackEventsMask( pTempPlayerPlay, SL_PLAYEVENT_HEADATEND );
-		if ( result != SL_RESULT_SUCCESS )
-		{
-			agk::Warning( "Failed to set temp sound callback flags" );
-			return;
-		}
-
-		if ( pSilence == 0 ) pSilence = new unsigned char[ 16000 ];
-		for ( int i = 0; i < 16000; i++ ) pSilence[ i ] = 0;
-		
-		result = (*pTempPlayerQueue)->Enqueue( pTempPlayerQueue, pSilence, 16000 );
-		if ( result != SL_RESULT_SUCCESS)
-		{
-			agk::Warning( "Failed to queue temp audio buffer" );
-		}
-		*/
-
 		SLPlaybackRateItf rateIf;
 		SLpermille min, max, step;
 		SLuint32 caps;
@@ -4345,16 +4392,6 @@ void cSoundMgr::PlatformInit()
 		m_fMaxPlaybackRate = max/1000.0f;
 		m_fStepPlaybackRate = step/1000.0f;
 		
-		/*
-		// set the player's state to playing
-		result = (*pTempPlayerPlay)->SetPlayState(pTempPlayerPlay, SL_PLAYSTATE_PLAYING);
-		if ( result != SL_RESULT_SUCCESS)
-		{
-			agk::Warning( "Failed to play temp audio player" );
-			return;
-		}
-		*/
-
 		(*pTempPlayer)->Destroy( pTempPlayer );
 		pTempPlayer = 0;
 	}
@@ -4388,20 +4425,6 @@ void cSoundMgr::PlatformAddFile( cSoundFile *pSound )
 
 void cSoundMgr::PlatformUpdate()
 {
-	// no longer use the temp player
-	/*
-	if ( g_bTempFinished )
-	{
-		g_bTempFinished = false;
-		
-		SLresult result = (*pTempPlayerQueue)->Enqueue( pTempPlayerQueue, pSilence, 16000 );
-		if ( result != SL_RESULT_SUCCESS)
-		{
-			agk::Warning( "Failed to queue temp audio buffer 2" );
-		}
-	}
-	*/
-	
 	// check music
 	if ( g_bMusicFinished )
 	{
@@ -4467,7 +4490,7 @@ void cSoundMgr::PlatformUpdate()
 					}
 				}
 
-				if ( pSound->m_iLoop == 0 )
+				if ( pSound->m_bFinished )
 				{
 					// remove this if the above section is uncommented
 					if ( m_pSoundFiles[ pSound->m_iParent ] ) m_pSoundFiles[ pSound->m_iParent ]->m_iInstances--;
@@ -4563,16 +4586,7 @@ void cSoundMgr::PlatformCleanUp()
 		delete pSound;
 	}
 
-	if ( pTempPlayerPlay ) (*pTempPlayerPlay)->SetPlayState(pTempPlayerPlay, SL_PLAYSTATE_STOPPED);
-	pTempPlayerPlay = 0;
-
-	if ( pTempPlayerQueue ) (*pTempPlayerQueue)->Clear( pTempPlayerQueue );
-	pTempPlayerQueue = 0;
-
-	if ( pTempPlayer ) (*pTempPlayer)->Destroy( pTempPlayer );
-	pTempPlayer = 0;
-	
-    if ( outputMixObject ) (*outputMixObject)->Destroy( outputMixObject );
+	if ( outputMixObject ) (*outputMixObject)->Destroy( outputMixObject );
 	outputMixObject = 0;
 	 
 	if ( engineObject ) (*engineObject)->Destroy( engineObject );
@@ -4871,6 +4885,34 @@ void cSoundMgr::StopInstance( UINT instance )
 	m_pUsedSounds = pSound;
 	
 	if ( pSound->m_pNextInst ) pSound->m_pNextInst->m_pPrevInst = pSound;
+}
+
+// youtube videos
+
+void agk::PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime )
+//****
+{
+	if ( !developerKey || !*developerKey ) return;
+	if ( !videoID || !*videoID ) return;
+
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "PlayYoutubeVideo","(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;I)V" );
+
+	jstring sDeveloperKey = lJNIEnv->NewStringUTF(developerKey);
+	jstring sVideoID = lJNIEnv->NewStringUTF(videoID);
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sDeveloperKey, sVideoID, (int)(startTime*1000) );
+	lJNIEnv->DeleteLocalRef( sVideoID );
+	lJNIEnv->DeleteLocalRef( sDeveloperKey );
+
+	vm->DetachCurrentThread();
 }
 
 // video commands 
@@ -5604,6 +5646,14 @@ char* agk::GetSpeechVoiceName( int index )
 	return retstr;
 }
 
+char* agk::GetSpeechVoiceID( int index )
+//****
+{
+    char *str = new char[20];
+	sprintf( str, "%d", index );
+    return str;
+}
+
 void agk::SetSpeechLanguage( const char* lang )
 //****
 {
@@ -5621,6 +5671,27 @@ void agk::SetSpeechLanguage( const char* lang )
 	jstring sLang = lJNIEnv->NewStringUTF(lang);
 	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sLang );
 	lJNIEnv->DeleteLocalRef( sLang );
+
+	vm->DetachCurrentThread();
+}
+
+void agk::SetSpeechLanguageByID( const char* szID )
+//****
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "SetSpeechLanguageByID","(Landroid/app/Activity;Ljava/lang/String;)V" );
+
+	jstring sID = lJNIEnv->NewStringUTF(szID);
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity, sID );
+	lJNIEnv->DeleteLocalRef( sID );
 
 	vm->DetachCurrentThread();
 }
@@ -5938,15 +6009,37 @@ int agk::PlatformCreateRawPath( const char* path )
 		return 0;
 	}
 
-	const char *origPath = path;
-
-	chdir( "/" );
-	path++;
-
 	uString sPath( path );
 	sPath.Replace( '\\', '/' );
+	sPath.Trunc( '/' );
+	if ( sPath.GetLength() == 0 ) sPath.SetStr( "/" );
+
+	int fd = open( sPath.GetStr(), O_RDONLY | O_CLOEXEC );
+	if ( fd >= 0 ) 
+	{
+		close( fd );
+		return 1; // already exists
+	}
+
+	int found = 0;
+	do
+	{
+		sPath.Trunc( '/' );
+		if ( sPath.GetLength() == 0 ) sPath.SetStr( "/" );
+		fd = open( sPath.GetStr(), O_RDONLY | O_CLOEXEC );
+		if ( fd >= 0 ) found = 1;
+	} while( sPath.GetLength() > 1 && !found );
 	
-	const char *szRemaining = sPath.GetStr();
+	if ( !found )
+	{
+		uString err; err.Format( "Failed to create path \"%s\", the app may not have permissions to create folders in the part that exists", path );
+		agk::Error( err );
+		return 0;
+	}
+
+	uString sPath2( path );
+	sPath2.Replace( '\\', '/' );
+	const char *szRemaining = sPath2.GetStr() + sPath.GetLength() + 1;
 	const char *szSlash;
 	char szFolder[ MAX_PATH ];
 	while ( (szSlash = strchr( szRemaining, '/' )) )
@@ -5954,7 +6047,7 @@ int agk::PlatformCreateRawPath( const char* path )
 		UINT length = (UINT)(szSlash-szRemaining);
 		if ( length == 0 )
 		{
-			uString err; err.Format( "Invalid path \"%s\", folder names must have at least one character", origPath );
+			uString err; err.Format( "Invalid path \"%s\", folder names must have at least one character", path );
 			agk::Error( err );
 			return 0;
 		}
@@ -5962,21 +6055,26 @@ int agk::PlatformCreateRawPath( const char* path )
 		strncpy( szFolder, szRemaining, length );
 		szFolder[ length ] = '\0';
 
-		if ( chdir( szFolder ) < 0 )
+		int newFd = openat( fd, szFolder, O_RDONLY | O_CLOEXEC );
+		if ( newFd < 0 )
 		{
-			mkdir( szFolder, 0777 );
-			if ( chdir( szFolder ) < 0 )
+			mkdirat( fd, szFolder, 0777 );
+			newFd = openat( fd, szFolder, O_RDONLY | O_CLOEXEC );
+			if ( newFd < 0 )
 			{
-				uString err; err.Format( "Failed to create folder \"%s\" in path \"%s\", the app may not have permission to create it", szFolder, origPath );
+				uString err; err.Format( "Failed to create folder \"%s\" in path \"%s\", the app may not have permission to create it", szFolder, path );
 				agk::Error( err );
 				return 0;
 			}
 		}
 
+		close( fd );
+		fd = newFd;
+
 		szRemaining = szSlash+1;
 	}
 
-	chdir( szWriteDir );
+	close( fd );
 
 	return 1;
 }
@@ -6077,12 +6175,12 @@ bool AGK::cFile::ExistsWrite( const char *szFilename )
 	uString sPath( szFilename );
 	agk::PlatformGetFullPathWrite( sPath );
 	
-	struct stat buf;
-	if ( stat( sPath.GetStr(), &buf ) != 0 ) return false;
+	//struct stat buf;
+	//if ( stat( sPath.GetStr(), &buf ) != 0 ) return false;
 	
-	//FILE *pFile = AGKfopen( sPath.GetStr(), "rb" );
-	//if ( !pFile ) return false;
-	//fclose( pFile );
+	FILE *pFile = AGKfopen( sPath.GetStr(), "rb" );
+	if ( !pFile ) return false;
+	fclose( pFile );
 
 	return true;
 }
@@ -6127,8 +6225,13 @@ bool cFile::ExistsRaw( const char *szFilename )
 	if ( !agk::IsAbsolutePath( szFilename ) ) return false;
 	
 	// absolute path to anywhere allowed
-	struct stat buf;
-	if ( stat( szFilename+4, &buf ) != 0 ) return false;
+	//struct stat buf;
+	//if ( stat( szFilename+4, &buf ) != 0 ) return false;
+
+	FILE *pFile = AGKfopen( szFilename+4, "rb" );
+	if ( !pFile ) return false;
+	fclose( pFile );
+
 	return true;
 }
 
@@ -6138,6 +6241,11 @@ bool AGK::cFile::Exists( const char *szFilename )
 
 	if ( strncmp(szFilename, "expansion:", strlen("expansion:")) == 0 )
 	{
+		uString sPath;
+		sPath.SetStr( szFilename + strlen("expansion") );
+		sPath.Replace( ':', '/' );
+		if ( ExistsWrite( sPath ) ) return true;
+
 		JNIEnv* lJNIEnv = g_pActivity->env;
 		JavaVM* vm = g_pActivity->vm;
 		vm->AttachCurrentThread(&lJNIEnv, NULL);
@@ -6295,8 +6403,9 @@ bool AGK::cFile::OpenToRead( const char *szFilename )
 		sPath.SetStr( szFilename + strlen("expansion") );
 		sPath.Replace( ':', '/' );
 		
-		if ( cFile::ExistsWrite( sPath ) ) agk::PlatformGetFullPathWrite( sPath );
-		else
+		// always load from expansion file in case it has changed
+		//if ( cFile::ExistsWrite( sPath ) ) agk::PlatformGetFullPathWrite( sPath );
+		//else
 		{
 			agk::PlatformGetFullPathWrite( sPath );
 			if ( !agk::ExtractExpansionFile( sPath, szFilename ) ) return false;
@@ -7069,15 +7178,8 @@ void agk::DeleteFolder( const char* szName )
 	{
 		uString sPath( szName+4 );
 		sPath.Replace( '\\', '/' );
-		int pos = sPath.RevFind( '/' );
-		if ( pos < 0 ) return;
-		uString sFolder;
-		sPath.SubString( sFolder, pos+1 );
-		sPath.Trunc( '/' );
 		
-		if ( chdir( sPath.GetStr() ) < 0 ) return;
-		rmdir( sFolder.GetStr() );
-		chdir( szWriteDir );
+		rmdir( sPath.GetStr() );
 	}
 	else
 	{
@@ -7088,13 +7190,11 @@ void agk::DeleteFolder( const char* szName )
 			return;
 		}
 
-		uString sDirPath( szWriteDir );
-		sDirPath.Append( m_sCurrentDir );
-		if ( chdir( sDirPath.GetStr() ) < 0 ) return;
+		uString sPath( szName );
+		PlatformGetFullPathWrite( sPath );
 
-		rmdir( szName );
-		chdir( szWriteDir );
-	
+		rmdir( sPath.GetStr() );
+			
 		m_bUpdateFileLists = true;
 	}
 }
@@ -7404,13 +7504,15 @@ int agk::PlatformGetAdPortal()
 
 void cEditBox::PlatformStartText()
 {
-	if ( !m_bUseAlternateInput || m_fY+m_fHeight < agk::GetVirtualHeight()/2.1f || agk::m_iKeyboardMode != 2 ) 
+	float topY = m_fY+m_fHeight;
+	if ( !m_bFixed ) topY = agk::WorldToScreenY( topY );
+	if ( !m_bUseAlternateInput || topY < agk::GetVirtualHeight()/2.1f || agk::m_iKeyboardMode != 2 ) 
 	{
 		g_bEditBoxHack = true;
 		
 		if ( agk::m_iKeyboardMode == 2 )
 		{
-			showKeyboard( true, m_bMultiLine ? 1 : 0 );
+			showKeyboard( true, m_bMultiLine ? 1 : 0, m_iInputType );
 
 			JNIEnv* lJNIEnv = g_pActivity->env;
 			JavaVM* vm = g_pActivity->vm;
@@ -7428,6 +7530,8 @@ void cEditBox::PlatformStartText()
 			lJNIEnv->DeleteLocalRef( text );
 
 			vm->DetachCurrentThread();
+
+			g_fChangeTimer = 0.25;
 		}
 	}
 	else
@@ -7441,7 +7545,7 @@ void cEditBox::PlatformEndText()
 {
 	if ( g_bEditBoxHack ) 
 	{
-		showKeyboard( false,0 );
+		showKeyboard( false,0,0 );
 	}
 	else
 	{
@@ -7461,6 +7565,12 @@ bool cEditBox::PlatformUpdateText()
 	if ( g_bEditBoxHack ) 
 	{
 		if ( agk::m_iKeyboardMode != 2 ) return false;
+
+		if ( g_fChangeTimer > 0 )
+		{
+			g_fChangeTimer -= agk::GetFrameTime();
+			return false;
+		}
 
 		JNIEnv* lJNIEnv = g_pActivity->env;
 		JavaVM* vm = g_pActivity->vm;
@@ -7632,6 +7742,7 @@ void cEditBox::PlatformUpdateTextEnd()
 		vm->DetachCurrentThread();
 
 		m_iOldLength = m_sCurrInput.GetNumChars();
+		g_fChangeTimer = 0.25;
 	}
 }
 
@@ -7727,6 +7838,15 @@ void agk::TerminateApp( UINT appID )
 
 void agk::ViewFile( const char* szFilename )
 {
+	if ( strncmp( szFilename, "raw:", 4 ) == 0 )
+	{
+		if ( CheckPermission( "WriteExternal" ) != 2 )
+		{
+			agk::Error( "You must request the WriteExternal permission before you can access raw file locations" );
+			return;
+		}
+	}
+
 	uString sPath( szFilename );
 	if ( !GetRealPath( sPath ) )
 	{
@@ -7894,6 +8014,57 @@ void agk::ShareImageAndText( const char* szFilename, const char* szText )
 	lJNIEnv->DeleteLocalRef( text );
 	lJNIEnv->DeleteLocalRef( filename );
 	
+	vm->DetachCurrentThread();
+}
+
+void agk::ShareFile( const char* szFilename )
+//****
+{
+	uString sPath( szFilename );
+	if ( !GetRealPath( sPath ) )
+	{
+		agk::Error( "Could not find file at the specified path" );
+		return;
+	}
+
+	if ( cFile::ExistsRead( szFilename ) && !cFile::ExistsWrite( szFilename ) ) 
+	{
+		// move file to write folder to avoid APK assets folder
+		cFile cSrcFile;
+		cSrcFile.OpenToRead( szFilename );
+
+		cFile cDstFile;
+		cDstFile.OpenToWrite( szFilename );
+
+		char buf[ 4096 ];
+		do
+		{
+			int written = cSrcFile.ReadData( buf, 4096 );
+			cDstFile.WriteData( buf, written );
+		} while( !cSrcFile.IsEOF() );
+
+		cDstFile.Close();
+		cSrcFile.Close();
+
+		sPath.SetStr( szFilename );
+		agk::PlatformGetFullPathWrite( sPath );
+	}
+
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID shareFile = lJNIEnv->GetStaticMethodID( AGKHelper, "ShareFile", "(Landroid/app/Activity;Ljava/lang/String;)V" );
+
+	jstring filename = lJNIEnv->NewStringUTF(sPath.GetStr());
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, shareFile, lNativeActivity, filename );
+	lJNIEnv->DeleteLocalRef( filename );
+
 	vm->DetachCurrentThread();
 }
 
@@ -9720,6 +9891,12 @@ char* agk::GetRawNFCData(UINT iIndex)
 
 void agk::StartGPSTracking()
 {
+	if ( CheckPermission("Location") != 2 )
+	{
+		agk::Error( "The app does not have permission to get the GPS location, use RequestPermission first" );
+		return;
+	}
+
 	JNIEnv* lJNIEnv = g_pActivity->env;
 	JavaVM* vm = g_pActivity->vm;
 	vm->AttachCurrentThread(&lJNIEnv, NULL);
@@ -9743,6 +9920,11 @@ void agk::StartGPSTracking()
 
 void agk::StopGPSTracking()
 {
+	if ( CheckPermission("Location") != 2 )
+	{
+		return;
+	}
+
 	JNIEnv* lJNIEnv = g_pActivity->env;
 	JavaVM* vm = g_pActivity->vm;
 	vm->AttachCurrentThread(&lJNIEnv, NULL);
@@ -9870,6 +10052,23 @@ void agk::GameCenterLogin()
 	vm->DetachCurrentThread();
 }
 
+void agk::GameCenterLogout()
+{
+	JNIEnv* lJNIEnv = g_pActivity->env;
+	JavaVM* vm = g_pActivity->vm;
+	vm->AttachCurrentThread(&lJNIEnv, NULL);
+
+	jobject lNativeActivity = g_pActivity->clazz;
+	if ( !lNativeActivity ) agk::Warning("Failed to get native activity pointer");
+	
+	jclass AGKHelper = GetAGKHelper(lJNIEnv);
+
+	jmethodID method = lJNIEnv->GetStaticMethodID( AGKHelper, "GameCenterLogout","()V" );
+	lJNIEnv->CallStaticVoidMethod( AGKHelper, method, lNativeActivity );
+
+	vm->DetachCurrentThread();
+}
+
 int agk::GetGameCenterLoggedIn()
 {
 	JNIEnv* lJNIEnv = g_pActivity->env;
@@ -9956,9 +10155,9 @@ void agk::GameCenterSubmitScore( int iScore, const char* szBoardID )
 	char *szPackage = agk::GetAppPackageName();
 	if ( strcmp(szPackage, "com.thegamecreators.agk_player2") == 0 )
 	{
-		if ( strcmp(szBoardID, "CgkIz4OlxJoaEAIQBg") != 0 )
+		if ( strcmp(szBoardID, "CgkI5Zjo8fsbEAIQBg") != 0 )
 		{
-			agk::Warning( "Using GameCenterSubmitScore when broadcasting must use BoardID CgkIz4OlxJoaEAIQBg for testing, export your app with your Google Play Games ID to use your own leaderboards" );
+			agk::Warning( "Using GameCenterSubmitScore when broadcasting must use BoardID CgkI5Zjo8fsbEAIQBg for testing, export your app with your Google Play Games ID to use your own leaderboards" );
 			return;
 		}
 	}
@@ -9992,9 +10191,9 @@ void agk::GameCenterShowLeaderBoard ( const char* szBoardID )
 	char *szPackage = agk::GetAppPackageName();
 	if ( strcmp(szPackage, "com.thegamecreators.agk_player2") == 0 )
 	{
-		if ( strcmp(szBoardID, "CgkIz4OlxJoaEAIQBg") != 0 )
+		if ( strcmp(szBoardID, "CgkI5Zjo8fsbEAIQBg") != 0 )
 		{
-			agk::Warning( "Using GameCenterShowLeaderBoard when broadcasting must use BoardID CgkIz4OlxJoaEAIQBg for testing, export your app with your Google Play Games ID to use your own leaderboards" );
+			agk::Warning( "Using GameCenterShowLeaderBoard when broadcasting must use BoardID CgkI5Zjo8fsbEAIQBg for testing, export your app with your Google Play Games ID to use your own leaderboards" );
 			return;
 		}
 	}
@@ -10533,7 +10732,7 @@ int AGKFont::PlatformGetSystemFontPath( const uString &sFontName, uString &sOut 
 
 	extern "C" 
 	{
-		ArStatus (*fpArCoreApk_requestInstall)( void* env, void* activity, bool user_requested_install, ArInstallStatus* out_install_status ) = 0;
+		ArStatus (*fpArCoreApk_requestInstallCustom)( void* env, void* activity, int user_requested_install, ArInstallBehavior install_behavior, ArInstallUserMessageType message_type, ArInstallStatus *out_install_status ) = 0;
 
 		ArStatus (*fpArSession_checkSupported)( const ArSession* session, const ArConfig* config ) = 0;
 		ArStatus (*fpArSession_configure)( ArSession* session, const ArConfig* config ) = 0;
@@ -10609,7 +10808,9 @@ int AGKFont::PlatformGetSystemFontPath( const uString &sFontName, uString &sOut 
 
 		
 		// real functions
-		ArStatus ArCoreApk_requestInstall( void* env, void* activity, bool user_requested_install, ArInstallStatus* out_install_status ) { return (ArStatus)fpArCoreApk_requestInstall( env, activity, user_requested_install, out_install_status ); }
+		ArStatus ArCoreApk_requestInstallCustom( void* env, void* activity, int user_requested_install, ArInstallBehavior install_behavior, ArInstallUserMessageType message_type, ArInstallStatus* out_install_status ) { 
+			return (ArStatus)fpArCoreApk_requestInstallCustom( env, activity, user_requested_install, install_behavior, message_type, out_install_status ); 
+		}
 
 		ArStatus ArSession_checkSupported( const ArSession* session, const ArConfig* config ) { return (ArStatus)fpArSession_checkSupported( session, config ); }
 		ArStatus ArSession_configure( ArSession* session, const ArConfig* config ) { return (ArStatus)fpArSession_configure( session, config ); }
@@ -10688,6 +10889,7 @@ int AGKFont::PlatformGetSystemFontPath( const uString &sFontName, uString &sOut 
 void agk::ARSetup()
 //****
 {
+	int request_install = (g_iARStatus != 1) ? 1 : 0; // only request install if we aren't returning from an install request
 	g_iARStatus = -1;
 
 #ifdef AGK_USE_AR
@@ -10716,7 +10918,7 @@ void agk::ARSetup()
 
 		agk::Warning( "Successfully loaded ARCore lib" );
 
-		fpArCoreApk_requestInstall = (ArStatus(*)(void*, void*, bool, ArInstallStatus*)) dlsym( g_pARCoreLibHandle, "ArCoreApk_requestInstall" );
+		fpArCoreApk_requestInstallCustom = (ArStatus(*)(void*, void*, int, ArInstallBehavior, ArInstallUserMessageType, ArInstallStatus*)) dlsym( g_pARCoreLibHandle, "ArCoreApk_requestInstallCustom" );
 
 		fpArSession_checkSupported = (ArStatus(*)(const ArSession*, const ArConfig*)) dlsym( g_pARCoreLibHandle, "ArSession_checkSupported" );
 		fpArSession_configure = (ArStatus(*)(ArSession*, const ArConfig* )) dlsym( g_pARCoreLibHandle, "ArSession_configure" );
@@ -10804,10 +11006,8 @@ void agk::ARSetup()
 		int orien = lJNIEnv->CallStaticIntMethod( AGKHelper, methodGetOrien, lNativeActivity );
 
 		ArInstallStatus install_status;
-		bool request_install = (g_iARStatus != 1); // only request install if we aren't returning from an install request
-
 		agk::Warning( "Requesting ARCore Install" );
-		ArStatus result = ArCoreApk_requestInstall( lJNIEnv, g_pActivity->clazz, request_install, &install_status );
+		ArStatus result = ArCoreApk_requestInstallCustom( lJNIEnv, g_pActivity->clazz, request_install, AR_INSTALL_BEHAVIOR_OPTIONAL, AR_INSTALL_USER_MESSAGE_TYPE_FEATURE, &install_status );
 		if ( result != AR_SUCCESS )
 		{
 			vm->DetachCurrentThread();
@@ -10895,9 +11095,15 @@ void agk::ARSetup()
 		g_iARHeight = m_iRealDeviceHeight;
 		ArSession_setDisplayGeometry( g_pARSession, orien, g_iARWidth, g_iARHeight );
 
-		if ( ArSession_resume(g_pARSession) != AR_SUCCESS )
+		result = ArSession_resume(g_pARSession);
+		if ( result != AR_SUCCESS )
 		{
-			agk::Warning( "Failed to resume ARCore session" );
+			switch( result )
+			{
+				case AR_ERROR_CAMERA_PERMISSION_NOT_GRANTED: agk::Warning( "Failed to resume ARCore session, camera permission not granted" );
+				case AR_ERROR_CAMERA_NOT_AVAILABLE: agk::Warning( "Failed to resume ARCore session, camera not available" );
+				default: agk::Warning( "Failed to resume ARCore session" );
+			}
 			return;
 		}
 	}

@@ -151,6 +151,9 @@ FILE* AGKfopen( const char *szPath, const char* mode )
 
 namespace AGK
 {
+    GLFWwindow *g_pWindow = 0;
+    float g_fWindowTimer = 0;
+    
 	bool g_bIsExternal = false;
 	void (*SwapExternal)(void*) = 0;
 	void *g_pSwapParam = 0;
@@ -195,6 +198,7 @@ namespace AGK
     cImage *m_pCaptureImage = 0;
 
 	// default screen size
+    int g_iIsAGKFullscreen = 0;
 	int g_iDefaultWidth = 0;
 	int g_iDefaultHeight = 0;
 	
@@ -502,17 +506,8 @@ void cFileEntry::InitFileList()
 
 void agk::SetWindowPosition( int x, int y )
 {
-	NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
-
-	// don't change position on a fullscreen window
-	if ( (window.styleMask & NSFullScreenWindowMask) != 0 ) return;
-    
-    NSScreen *mainScreen = [NSScreen mainScreen];
-
-    int newY = mainScreen.frame.size.height - window.frame.size.height - y;
-    NSRect windowRect = NSMakeRect(x,newY,window.frame.size.width,window.frame.size.height);
-        
-    [window setFrame:windowRect display:YES animate:NO];
+    if ( !g_pWindow ) return;
+    glfwSetWindowPos( g_pWindow, x, y );
 }
 
 void agk::SetWindowSize( int width, int height, int fullscreen )
@@ -522,91 +517,95 @@ void agk::SetWindowSize( int width, int height, int fullscreen )
 
 void agk::SetWindowSize( int width, int height, int fullscreen, int allowOverSized )
 {
-	NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
+    if ( !g_pWindow ) return;
+    
+    // GLFW fullscreen is not the same as Mac fullscreen (green button)
+    // must turn off Mac fullscreen if it is being used
+    NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
+    if ( (window.styleMask & NSFullScreenWindowMask) != 0 )
+    {
+        [ window toggleFullScreen:nil ];
+    }
     
     if ( g_iDefaultWidth == 0 ) g_iDefaultWidth = agk::GetDeviceWidth();
     if ( g_iDefaultHeight == 0 ) g_iDefaultHeight = agk::GetDeviceHeight();
     
+    if ( width < 0 ) width = 0;
+    if ( height < 0 ) height = 0;
+    
+    if ( width == 0 ) width = g_iDefaultWidth;
+    if ( height == 0 ) height = g_iDefaultHeight;
+    
+    if ( allowOverSized == 0 )
+    {
+        if ( width > agk::GetMaxDeviceWidth() ) width = agk::GetMaxDeviceWidth();
+        if ( height > agk::GetMaxDeviceHeight() ) height = agk::GetMaxDeviceHeight();
+    }
+    
+    static int oldX = 0;
+    static int oldY = 0;
+    
     if ( fullscreen )
     {
-        //[[NSApplication sharedApplication] setPresentationOptions:NSApplicationPresentationFullScreen];
-        [ window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary ];
+        if ( g_iIsAGKFullscreen ) return;
+        g_iIsAGKFullscreen = 1;
         
-        if ( (window.styleMask & NSFullScreenWindowMask) == 0 )
-        {
-            // if resize style is not set then full screen window becomes corrupted
-            [window setStyleMask:[window styleMask] | NSResizableWindowMask];
-            [ window toggleFullScreen:nil ];
+        int nmonitors, i;
+        int wx, wy, ww, wh;
+        int mx, my, mw, mh;
+        int overlap, bestoverlap;
+        GLFWmonitor *bestmonitor;
+        GLFWmonitor **monitors;
+        const GLFWvidmode *mode;
+        
+        bestoverlap = 0;
+        bestmonitor = NULL;
+        
+        glfwGetWindowPos(g_pWindow, &wx, &wy);
+        oldX = wx; oldY = wy;
+        glfwGetWindowSize(g_pWindow, &ww, &wh);
+        monitors = glfwGetMonitors(&nmonitors);
+        
+        for (i = 0; i < nmonitors; i++) {
+            mode = glfwGetVideoMode(monitors[i]);
+            glfwGetMonitorPos(monitors[i], &mx, &my);
+            mw = mode->width;
+            mh = mode->height;
+            
+            int mini = wx + ww < mx + mw ? wx + ww : mx + mw;
+            int maxi = wx > mx ? wx : mx;
+            
+            overlap = mini - maxi;
+            if ( overlap < 0 ) overlap = 0;
+            
+            mini = wy + wh < my + mh ? wy + wh : my + mh;
+            maxi = wy > my ? wy : my;
+            
+            int overlap2 = mini - maxi;
+            if ( overlap2 < 0 ) overlap2 = 0;
+            
+            overlap *= overlap2;
+            
+            if (bestoverlap < overlap) {
+                bestoverlap = overlap;
+                bestmonitor = monitors[i];
+            }
         }
+        
+        mode = glfwGetVideoMode(bestmonitor);
+        glfwSetWindowMonitor( g_pWindow, bestmonitor, 0, 0, mode->width, mode->height, mode->refreshRate );
     }
     else
     {
-        if ( (window.styleMask & NSFullScreenWindowMask) != 0 )
+        if ( !g_iIsAGKFullscreen )
         {
-            [ window toggleFullScreen:nil ];
-            if ( (m_bAGKFlags & AGK_FLAG_CAN_RESIZE) == 0 )
-            {
-                // restore resizable style to user specified value
-                [window setStyleMask:[window styleMask] & ~NSResizableWindowMask];
-            }
+            glfwSetWindowSize( g_pWindow, width, height );
         }
-
-        [ window setCollectionBehavior:NSWindowCollectionBehaviorDefault ];
-        //[[NSApplication sharedApplication] setPresentationOptions:NSApplicationPresentationDefault];
-        
-        NSScreen *mainScreen = [NSScreen mainScreen];
-        NSRect screenRect = [mainScreen visibleFrame];
-
-		if ( width < 0 ) width = 0;
-		if ( height < 0 ) height = 0;
-
-		if ( width == 0 ) width = g_iDefaultWidth;
-		if ( height == 0 ) height = g_iDefaultHeight;
-
-		if ( width == 0 ) width = agk::GetMaxDeviceWidth();
-		if ( height == 0 ) height = agk::GetMaxDeviceHeight();
-        
-        if ( allowOverSized == 0 )
+        else
         {
-			float appAspect = width / (float) height;
-			float windowAspect = (screenRect.size.width-15) / (float) (screenRect.size.height-25);
-	        
-			if ( appAspect > windowAspect )
-			{
-				if ( width > screenRect.size.width-15 )
-				{
-					float ratio = (screenRect.size.width-15) / (float)width;
-					width = screenRect.size.width-15;
-					height = (int) height*ratio;
-				}
-			}
-			else
-			{
-				if ( height > screenRect.size.height-25 )
-				{
-					float ratio = (screenRect.size.height-25) / (float)height;
-					height = screenRect.size.height-25;
-					width = (int) width*ratio;
-				}
-			}
-		}
-        
-        NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
-        
-//        int x = (screenRect.size.width-width)/2;
-//        int y = (screenRect.size.height-height)/2;
-        //y += mainScreen.frame.size.height - screenRect.size.height;
-        
-        int oldY = mainScreen.frame.size.height - window.frame.size.height - window.frame.origin.y;
-        
-        NSRect windowRect = [window frameRectForContentRect:NSMakeRect(window.frame.origin.x,window.frame.origin.y,width,height)];
-        windowRect.origin.x = window.frame.origin.x;
-        windowRect.origin.y = mainScreen.frame.size.height - windowRect.size.height - oldY;
-        
-        [window setFrame:windowRect display:YES animate:NO];
-        
-//        glfwSetWindowSize(width, height);
-        //glfwSetWindowPos(x, y);
+            g_iIsAGKFullscreen = 0;
+            glfwSetWindowMonitor( g_pWindow, NULL, oldX, oldY, width, height, 0 );
+        }
     }
 }
 
@@ -655,6 +654,19 @@ void agk::SetScreenResolution( int width, int height )
 //****
 {
 	agk::SetWindowSize( width, height, 0 );
+}
+
+char* agk::GetURLSchemeText()
+//****
+{
+	char* str = new char[1]; *str = 0;
+	return str;
+}
+
+void agk::ClearURLSchemeText()
+//****
+{
+
 }
 
 void agk::GetDeviceName( uString &outString )
@@ -758,6 +770,11 @@ int agk::GetExpansionFileState()
 	return 0;
 }
 
+int agk::GetExpansionFileError()
+{
+	return 0;
+}
+
 void agk::DownloadExpansionFile()
 {
 	// do nothing on mac
@@ -775,7 +792,7 @@ bool agk::ExtractExpansionFile( const char* localFile, const char* expansionFile
 
 void agk::SetWindowTitle( const char *szTitle )
 {
-	glfwSetWindowTitle( szTitle );
+	glfwSetWindowTitle( g_pWindow, szTitle );
 }
 
 bool agk::GetDeviceCanRotate()
@@ -1060,19 +1077,27 @@ void agk::PlatformInitExternal( void* ptr, int width, int height, void(*swap)(vo
 	PlatformInitCommon();
 }
 
+struct egldata
+{
+    GLFWwindow* window;
+};
+
 void agk::PlatformInitGL( void* ptr )
 {
 	g_bIsExternal = false;
     
+    g_pWindow = ((egldata*)ptr)->window;
+    
 	NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
-	m_iRenderWidth = [[ window contentView ] frame ].size.width;
-	m_iRenderHeight = [[ window contentView ] frame ].size.height;
+	m_iRealDeviceWidth = [[ window contentView ] frame ].size.width;
+	m_iRealDeviceHeight = [[ window contentView ] frame ].size.height;
+    
+    glfwGetFramebufferSize( g_pWindow, &m_iRenderWidth, &m_iRenderHeight );
 	cCamera::UpdateAllAspectRatio( m_iRenderWidth/(float)m_iRenderHeight );
-	
-	m_iRealDeviceWidth = m_iRenderWidth;
-	m_iRealDeviceHeight = m_iRenderHeight;
-
+    
 	PlatformInitCommon();
+    
+    g_fWindowTimer = agk::Timer() + 0.5;
 }
 
 void agk::PlatformInitConsole()
@@ -1140,8 +1165,7 @@ void agk::PlatformSetBlendMode( int mode )
 void agk::SetVSync( int mode )
 {
 	if ( mode < 0 ) mode = 0;
-	CGLContextObj context = CGLGetCurrentContext();
-	CGLSetParameter(context, kCGLCPSwapInterval, &mode);
+	glfwSwapInterval( mode );
 
 	m_bUsingVSync = mode > 0;
 }
@@ -1200,13 +1224,12 @@ int agk::GetDevicePlatform()
 void agk::PlatformUpdateDeviceSize()
 {
 	NSWindow *window = [[[NSApplication sharedApplication] windows] objectAtIndex:0];
-	m_iRenderWidth = [[ window contentView ] frame ].size.width;
-	m_iRenderHeight = [[ window contentView ] frame ].size.height;
+	m_iRealDeviceWidth = [[ window contentView ] frame ].size.width;
+	m_iRealDeviceHeight = [[ window contentView ] frame ].size.height;
+    
+    glfwGetFramebufferSize( g_pWindow, &m_iRenderWidth, &m_iRenderHeight );
 	cCamera::UpdateAllAspectRatio( m_iRenderWidth/(float)m_iRenderHeight );
-    
-    m_iRealDeviceWidth = m_iRenderWidth;
-	m_iRealDeviceHeight = m_iRenderHeight;
-    
+        
     /*
     //capture
     if ( mCaptureView )
@@ -1248,7 +1271,17 @@ void agk::CompositionChanged()
 
 void agk::PlatformSync()
 {
-	if ( !g_bIsExternal ) PlatformSwap();
+	if ( !g_bIsExternal )
+    {
+        if ( g_fWindowTimer > 0 && agk::Timer() > g_fWindowTimer )
+        {
+            int winX, winY;
+            glfwGetWindowPos(g_pWindow, &winX, &winY );
+            glfwSetWindowPos(g_pWindow, winX, winY+1);
+            g_fWindowTimer = 0;
+        }
+        PlatformSwap();
+    }
 	else 
 	{
 		if ( SwapExternal ) SwapExternal( g_pSwapParam );
@@ -2126,6 +2159,37 @@ void agk::VibrateDevice( float seconds )
 	// do nothing
 }
 
+void agk::SetClipboardText( const char* szText )
+//****
+{
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    [pasteboard clearContents];
+    [pasteboard setString:[NSString stringWithUTF8String:szText] forType:NSStringPboardType];
+}
+
+char* agk::GetClipboardText()
+//****
+{
+    NSPasteboard *pasteboard = [NSPasteboard generalPasteboard];
+    if ( pasteboard )
+    {
+        NSString *string = [pasteboard stringForType:NSStringPboardType];
+        if ( string )
+        {
+            const char *text = [string UTF8String];
+            if ( text && *text )
+            {
+                char *str = new char[ strlen(text) + 1 ];
+                strcpy( str, text );
+                return str;
+            }
+        }
+    }
+    
+    char *str = new char[1]; *str = 0;
+    return str;
+}
+
 // Music
 
 void cMusicMgr::PlatformAddFile( cMusic *pMusic )
@@ -2582,6 +2646,10 @@ void cSoundMgr::PlatformUpdate()
 		
 		if ( pSound->sourceID )
 		{
+			int state = 0;
+			alGetSourcei( pSound->sourceID, AL_SOURCE_STATE, &state );
+
+			//alGetSourcei(pSound->sourceID, AL_SOURCE_STATE, &state);
 			alGetSourcei(pSound->sourceID, AL_BUFFERS_PROCESSED, &buffers);
 			if ( buffers > 0 )
 			{
@@ -2596,12 +2664,12 @@ void cSoundMgr::PlatformUpdate()
 				if ( pSound->m_iLoop == 1 || pSound->m_iLoopCount+1 < pSound->m_iLoop )
 				{
 					alSourceQueueBuffers(pSound->sourceID, 1, &(pSound->bufferID));
+					if ( state != AL_PLAYING ) alSourcePlay(pSound->sourceID);
+					state = AL_PLAYING;
 				}
 			}
-            
-            int state = 0;
-            alGetSourcei( pSound->sourceID, AL_SOURCE_STATE, &state );
-            if ( state != AL_PLAYING )
+
+			if ( state != AL_PLAYING )
             {
                 pSound->m_iLoopCount++;
                 
@@ -2911,6 +2979,16 @@ void cSoundMgr::StopInstance( UINT instance )
 	if ( pSound->m_pNextInst ) pSound->m_pNextInst->m_pPrevInst = pSound;
 }
 
+// youtube videos
+
+void agk::PlayYoutubeVideo( const char* developerKey, const char* videoID, float startTime )
+//****
+{
+	uString sURL;
+	sURL.Format( "https://www.youtube.com/watch?v=%s&t=%d", videoID, (int)startTime );
+	OpenBrowser( sURL );
+}
+
 
 // video commands
 
@@ -3156,7 +3234,10 @@ float agk::GetVideoHeight()
 void agk::SetVideoPosition( float seconds )
 //****
 {
-	
+    if ( !g_videoPlayer ) return;
+    
+    int32_t timeScale = g_videoPlayer.currentItem.asset.duration.timescale;
+    [g_videoPlayer seekToTime:CMTimeMakeWithSeconds(seconds, timeScale) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
 }
 
 // Screen recording
@@ -3258,7 +3339,20 @@ char* agk::GetSpeechVoiceName( int index )
     return str;
 }
 
+char* agk::GetSpeechVoiceID( int index )
+//****
+{
+    char *str = new char[1]; *str = 0;
+    return str;
+}
+
 void agk::SetSpeechLanguage( const char* lang )
+//****
+{
+
+}
+
+void agk::SetSpeechLanguageByID( const char* sID )
 //****
 {
 
@@ -4969,6 +5063,12 @@ void agk::ShareImageAndText( const char* szFilename, const char* szText )
 
 }
 
+void agk::ShareFile( const char* szFilename )
+//****
+{
+
+}
+
 void agk::FacebookActivateAppTracking()
 //****
 {
@@ -5101,6 +5201,11 @@ void agk::GameCenterSetup()
 }
 
 void agk::GameCenterLogin()
+{
+	
+}
+
+void agk::GameCenterLogout()
 {
 	
 }
@@ -5248,7 +5353,7 @@ int agk::PlatformGetIPv6( uString &sIP, int *iInterface )
 
 int agk::CheckPermission( const char* szPermission )
 {
-	return 1;
+	return 2;
 }
 
 void agk::RequestPermission( const char* szPermission )

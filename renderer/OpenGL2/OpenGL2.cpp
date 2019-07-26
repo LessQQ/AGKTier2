@@ -474,6 +474,11 @@ bool IsExtensionSupported(const char *extension)
 
 #ifdef AGK_MACOS
 
+    namespace AGK
+    {
+        extern GLFWwindow *g_pWindow;
+    }
+
 	void agk::PlatformDestroyGL ( void )
 	{
 		
@@ -492,7 +497,7 @@ bool IsExtensionSupported(const char *extension)
 		}
 		
 		// display backbuffer
-		glfwSwapBuffers();
+		glfwSwapBuffers(g_pWindow);
 	}
 #endif
 
@@ -2236,13 +2241,15 @@ void AGKShader::SetShaderSource( const char* vertex, const char* fragment )
 	m_sPSSource.SetStr( fragment );
 
 	// desktop OpenGL doesn't support precision modifiers
-	m_sVSSource.ReplaceStr( "mediump ", " " );
-	m_sVSSource.ReplaceStr( "highp ", " " );
-	m_sVSSource.ReplaceStr( "lowp ", " " );
+	m_sVSSource.ReplaceStr( "mediump ", "" );
+	m_sVSSource.ReplaceStr( "highp ", "" );
+	m_sVSSource.ReplaceStr( "lowp ", "" );
+	m_sVSSource.ReplaceStr( "precision float;", "" );
 
-	m_sPSSource.ReplaceStr( "mediump ", " " );
-	m_sPSSource.ReplaceStr( "highp ", " " );
-	m_sPSSource.ReplaceStr( "lowp ", " " );
+	m_sPSSource.ReplaceStr( "mediump ", "" );
+	m_sPSSource.ReplaceStr( "highp ", "" );
+	m_sPSSource.ReplaceStr( "lowp ", "" );
+	m_sPSSource.ReplaceStr( "precision float;", "" );
 
 	m_sVSLog.SetStr( "" );
 	m_sPSLog.SetStr( "" );
